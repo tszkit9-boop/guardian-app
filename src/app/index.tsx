@@ -1,9 +1,11 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView, Linking, Pressable } from 'react-native';
+import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, ScrollView, Linking, Pressable, Platform } from 'react-native';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as Location from 'expo-location';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAZNQcRCFis8e3aYy7b3nxd8pafzNgYw",
@@ -15,16 +17,32 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const storage = getStorage(app);
+
+// 🌟 網頁版專用彈窗（解決 Alert.alert 冇反應問題）
+const showAlert = (title, msg) => {
+  if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
+  else Alert.alert(title, msg);
+};
+const showConfirm = (title, msg, onConfirm) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${msg}`)) onConfirm();
+  } else {
+    Alert.alert(title, msg, [
+      { text: '取消', style: 'cancel' },
+      { text: '確定', style: 'destructive', onPress: onConfirm }
+    ]);
+  }
+};
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [view, setView] = useState('guard'); // 'guard' 或 'admin'
+  const [view, setView] = useState('guard'); 
   
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // 守護狀態
   const [destination, setDestination] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [duration, setDuration] = useState('30');
@@ -33,6 +51,12 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(0); 
   const timerRef = useRef(null);
 
+  // 錄影
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const cameraRef = useRef(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
   // 管理員數據
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
@@ -40,44 +64,38 @@ export default function App() {
   const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
 
-  // 登入/註冊邏輯
   const handleAuth = async () => {
-    if (!username || !password) return Alert.alert('提示', '請輸入名稱同密碼！');
+    if (!username || !password) return showAlert('提示', '請輸入名稱同密碼！');
     try {
       const userRef = doc(db, "users", username);
       const userSnap = await getDoc(userRef);
       if (isLoginMode) {
         if (userSnap.exists() && userSnap.data().password === password) {
           setCurrentUser(username);
-          // 🌟 霸道設定：只要係 tszkit9，登入直接入後台！
-          if (username === 'tszkit9') {
-            setView('admin');
-          } else {
-            setView('guard');
-          }
-        } else Alert.alert('錯誤', '名稱或密碼錯誤！');
+          if (username === 'tszkit9') setView('admin'); // 直接入後台
+          else setView('guard');
+        } else showAlert('錯誤', '名稱或密碼錯誤！');
       } else {
-        if (userSnap.exists()) Alert.alert('錯誤', '名稱已被使用！');
+        if (userSnap.exists()) showAlert('錯誤', '名稱已被使用！');
         else {
           await setDoc(userRef, { username, password });
-          Alert.alert('成功', '註冊成功！請登入。');
+          showAlert('成功', '註冊成功！請登入。');
           setIsLoginMode(true);
         }
       }
-    } catch (e) { Alert.alert('錯誤', '網絡問題。'); }
+    } catch (e) { showAlert('錯誤', '網絡問題。'); }
   };
 
-  // 開始守護
   const startGuardian = async () => {
-    if (!destination || !contactPhone) return Alert.alert('提示', '請填寫目的地同聯絡人！');
+    if (!destination || !contactPhone) return showAlert('提示', '請填寫目的地同聯絡人！');
     const minutes = parseInt(duration);
-    if (isNaN(minutes) || minutes <= 0) return Alert.alert('提示', '請輸入正確預計時間！');
+    if (isNaN(minutes) || minutes <= 0) return showAlert('提示', '請輸入正確預計時間！');
 
     setLocationText('正在獲取位置及地址...');
 
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return Alert.alert('錯誤', '需要定位權限！');
+      if (status !== 'granted') return showAlert('錯誤', '需要定位權限！');
 
       let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = loc.coords;
@@ -99,10 +117,11 @@ export default function App() {
       setLocationText(`已定位：${addressString}`);
       setIsGuarding(true);
       setTimeLeft(minutes * 60); 
+      
+      if (!cameraPermission?.granted) await requestCameraPermission();
     } catch (error) { setLocationText('定位出錯'); }
   };
 
-  // 倒數計時
   useEffect(() => {
     if (isGuarding && timeLeft > 0) {
       timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
@@ -114,40 +133,66 @@ export default function App() {
   }, [isGuarding, timeLeft]);
 
   const autoTriggerSOS = async () => {
-    Alert.alert('⚠️ 逾時警告', '系統已自動發出求救！');
+    showAlert('⚠️ 逾時警告', '系統已自動發出求救！');
     await addDoc(collection(db, "sos_alerts"), {
       username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: true
     });
   };
 
-  // 結束守護
   const stopGuardian = async () => {
     clearInterval(timerRef.current);
     await setDoc(doc(db, "locations", currentUser), { status: 'arrived' }, { merge: true });
     setIsGuarding(false);
     setTimeLeft(0);
     setLocationText('僅在你同意後分享定位');
-    Alert.alert('安全抵達', '已通知後台你安全抵達。');
+    showAlert('安全抵達', '已通知後台你安全抵達。');
   };
 
-  // 手動 SOS
-  const triggerSOS = async () => {
-    Alert.alert('確認求救', '確定要發出緊急求救嗎？', [
-      { text: '取消', style: 'cancel' },
-      { text: '確定', style: 'destructive', onPress: async () => {
-          clearInterval(timerRef.current);
-          await addDoc(collection(db, "sos_alerts"), {
-            username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false
-          });
-          Alert.alert('求救已發出', '管理員已收到通知！');
-      }}
-    ]);
+  const triggerSOS = () => {
+    showConfirm('確認求救', '確定要發出緊急求救嗎？', async () => {
+      clearInterval(timerRef.current);
+      await addDoc(collection(db, "sos_alerts"), {
+        username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false
+      });
+      showAlert('求救已發出', '管理員已收到通知！');
+    });
+  };
+
+  const handleRecordVideo = async () => {
+    if (!cameraRef.current) return;
+    if (isRecording) {
+      cameraRef.current.stopRecording();
+      setIsRecording(false);
+      return;
+    }
+
+    setIsRecording(true);
+    try {
+      const video = await cameraRef.current.recordAsync({ maxDuration: 15 });
+      if (video) {
+        setIsUploading(true);
+        const response = await fetch(video.uri);
+        const blob = await response.blob();
+        const storageRef = ref(storage, `videos/${currentUser}-${Date.now()}.mp4`);
+        await uploadBytes(storageRef, blob);
+        const downloadURL = await getDownloadURL(storageRef);
+
+        await addDoc(collection(db, "videos"), {
+          username: currentUser, videoUrl: downloadURL, timestamp: new Date().toISOString()
+        });
+        showAlert('錄影成功', '影片已安全上傳到後台。');
+      }
+    } catch (error) {
+      showAlert('錄影失敗', '請確保已允許相機權限。');
+    } finally {
+      setIsRecording(false);
+      setIsUploading(false);
+    }
   };
 
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   const startVideoCall = (roomName) => Linking.openURL(`https://meet.jit.si/guardian-${roomName}`);
 
-  // 管理員實時監聽
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
       const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
@@ -167,11 +212,11 @@ export default function App() {
   }, [currentUser, view]);
 
   const addAdmin = async () => {
-    if (!newAdminName) return Alert.alert('請輸入名稱');
+    if (!newAdminName) return showAlert('提示', '請輸入名稱');
     await setDoc(doc(db, "admins", newAdminName), { role: "admin" });
     setAdminList([...adminList, newAdminName]);
     setNewAdminName('');
-    Alert.alert('成功', `${newAdminName} 已成為管理員！`);
+    showAlert('成功', `${newAdminName} 已成為管理員！`);
   };
 
   const formatTime = (seconds) => {
@@ -180,8 +225,6 @@ export default function App() {
     return `${m}:${s}`;
   };
 
-  // ================= 畫面渲染 =================
-
   if (!currentUser) {
     return (
       <SafeAreaView style={styles.container}>
@@ -189,12 +232,12 @@ export default function App() {
         <Text style={styles.subtitle}>{isLoginMode ? '登入帳戶' : '註冊新帳戶'}</Text>
         <TextInput style={styles.input} placeholder="輸入名稱" value={username} onChangeText={setUsername} autoCapitalize="none" />
         <TextInput style={styles.input} placeholder="輸入密碼" value={password} onChangeText={setPassword} secureTextEntry />
-        <TouchableOpacity style={styles.button} onPress={handleAuth}>
+        <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={handleAuth}>
           <Text style={styles.buttonText}>{isLoginMode ? '登入' : '確認註冊'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setIsLoginMode(!isLoginMode)} style={{ marginTop: 20 }}>
+        </Pressable>
+        <Pressable onPress={() => setIsLoginMode(!isLoginMode)} style={{ marginTop: 20 }}>
           <Text style={{ textAlign: 'center', color: '#2196F3', fontSize: 16 }}>{isLoginMode ? '未有名稱？去註冊' : '已經有帳戶？去登入'}</Text>
-        </TouchableOpacity>
+        </Pressable>
       </SafeAreaView>
     );
   }
@@ -221,7 +264,6 @@ export default function App() {
         </View>
       </View>
 
-      {/* 🛡️ 用戶守護畫面 */}
       {view === 'guard' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>守護同行 Guardian</Text>
@@ -245,9 +287,11 @@ export default function App() {
                 <Text style={styles.label}>⏱️ 預計需要時間（分鐘）</Text>
                 <TextInput style={styles.input} placeholder="例如: 30" value={duration} onChangeText={setDuration} keyboardType="numeric" />
               </View>
-              <TouchableOpacity style={styles.button} onPress={startGuardian}>
+              
+              {/* 🌟 改用 Pressable */}
+              <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={startGuardian}>
                 <Text style={styles.buttonText}>開始安全陪伴</Text>
-              </TouchableOpacity>
+              </Pressable>
             </>
           ) : (
             <View style={styles.guardingBox}>
@@ -260,32 +304,46 @@ export default function App() {
                 </Text>
               </View>
 
+              {cameraPermission?.granted ? (
+                <View style={{ marginBottom: 15, borderRadius: 10, overflow: 'hidden', height: 200 }}>
+                  <CameraView style={{ flex: 1 }} ref={cameraRef} mode="video" facing="back" />
+                </View>
+              ) : (
+                <Pressable style={({pressed}) => [styles.button, {backgroundColor: '#607D8B', opacity: pressed ? 0.7 : 1}]} onPress={requestCameraPermission}>
+                  <Text style={styles.buttonText}>允許相機權限 (用於錄影)</Text>
+                </Pressable>
+              )}
+
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
-                <TouchableOpacity style={[styles.button, { flex: 1, backgroundColor: '#2196F3', marginTop: 0 }]} onPress={() => callPhone(contactPhone)}>
+                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#2196F3', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(contactPhone)}>
                   <Text style={styles.buttonText}>📞 致電聯絡人</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.button, { flex: 1, backgroundColor: '#9C27B0', marginTop: 0 }]} onPress={() => startVideoCall(currentUser)}>
+                </Pressable>
+                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#9C27B0', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(currentUser)}>
                   <Text style={styles.buttonText}>📹 視像通話</Text>
-                </TouchableOpacity>
+                </Pressable>
               </View>
 
-              <TouchableOpacity style={[styles.button, { backgroundColor: '#D32F2F', marginTop: 15 }]} onPress={triggerSOS}>
+              {cameraPermission?.granted && (
+                <Pressable style={({pressed}) => [styles.button, { backgroundColor: isRecording ? '#D32F2F' : '#607D8B', marginTop: 15, opacity: pressed ? 0.7 : 1 }]} onPress={handleRecordVideo} disabled={isUploading}>
+                  <Text style={styles.buttonText}>{isUploading ? '上傳中...' : isRecording ? '⏹️ 停止錄影並上傳' : '🔴 錄影存證'}</Text>
+                </Pressable>
+              )}
+
+              <Pressable style={({pressed}) => [styles.button, { backgroundColor: '#D32F2F', marginTop: 15, opacity: pressed ? 0.7 : 1 }]} onPress={triggerSOS}>
                 <Text style={styles.buttonText}>🚨 我感覺不安全 (SOS)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.stopButton]} onPress={stopGuardian}>
+              </Pressable>
+              <Pressable style={({pressed}) => [styles.button, styles.stopButton, {opacity: pressed ? 0.7 : 1}]} onPress={stopGuardian}>
                 <Text style={styles.buttonText}>我已安全抵達</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
           )}
         </ScrollView>
       )}
 
-      {/* 👑 管理員後台畫面 */}
       {view === 'admin' && currentUser === 'tszkit9' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
 
-          {/* 緊急求救區 */}
           {sosAlerts.length > 0 && (
             <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
@@ -294,19 +352,18 @@ export default function App() {
                   <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
                   <Text>位置：{alert.address}</Text>
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F' }]} onPress={() => callPhone(alert.contactPhone)}>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(alert.contactPhone)}>
                       <Text style={styles.buttonText}>📞 致電</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(alert.username)}>
+                    </Pressable>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0', opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(alert.username)}>
                       <Text style={styles.buttonText}>📹 視訊</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   </View>
                 </View>
               ))}
             </View>
           )}
 
-          {/* 實時監控區 */}
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
             {activeGuardians.length === 0 ? <Text style={{color:'#999'}}>目前無人需要守護。</Text> : 
@@ -316,32 +373,32 @@ export default function App() {
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
                   
-                  <TouchableOpacity onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
+                  <Pressable onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
                     <Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text>
-                  </TouchableOpacity>
+                  </Pressable>
 
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3' }]} onPress={() => callPhone(g.contactPhone)}>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(g.contactPhone)}>
                       <Text style={styles.buttonText}>📞 致電</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(g.username)}>
+                    </Pressable>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0', opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(g.username)}>
                       <Text style={styles.buttonText}>📹 視訊</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   </View>
                 </View>
               ))
             }
           </View>
 
-          {/* 新增管理員 */}
           <View style={styles.card}>
             <Text style={styles.label}>👑 新增管理員</Text>
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
-            <TouchableOpacity style={styles.button} onPress={addAdmin}><Text style={styles.buttonText}>確認新增</Text></TouchableOpacity>
+            <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={addAdmin}>
+              <Text style={styles.buttonText}>確認新增</Text>
+            </Pressable>
             <Text style={{ marginTop: 10, color: '#666' }}>名單：{adminList.join(', ')}</Text>
           </View>
 
-          {/* 註冊用戶總數 */}
           <View style={styles.card}>
             <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
             <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
