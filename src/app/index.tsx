@@ -60,7 +60,7 @@ export default function LoginScreen() {
       <Text style={styles.title}>🛡️ 守護同行</Text>
       <Text style={styles.subtitle}>{isLoginMode ? '登入帳戶' : '註冊新帳戶'}</Text>
 
-      <TextInput style={styles.input} placeholder="輸入名稱 (例如: tszkit9)" value={username} onChangeText={setUsername} autoCapitalize="none" />
+      <TextInput style={styles.input} placeholder="輸入名稱 " value={username} onChangeText={setUsername} autoCapitalize="none" />
       <TextInput style={styles.input} placeholder="輸入密碼" value={password} onChangeText={setPassword} secureTextEntry />
       
       <TouchableOpacity style={styles.button} onPress={handleAuth}>
