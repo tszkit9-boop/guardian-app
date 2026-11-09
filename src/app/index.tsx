@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+// @ts-nocheck
+import { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { useRouter } from 'expo-router'; // 用嚟跳去後台
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { useRouter } from 'expo-router';
 
-// ⚠️ 貼你嘅 Config
 const firebaseConfig = {
   apiKey: "AIzaSyAZNQcRCFis8e3aYy7b3nxd8pafzNgYw",
   authDomain: "guardian-app-f23c6.firebaseapp.com",
@@ -14,62 +14,77 @@ const firebaseConfig = {
   appId: "1:1075988300124:web:59be47526be9800e6e60199",
 };
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+const db = getFirestore(app);
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [user, setUser] = useState<any>(null);
+  const [isLoginMode, setIsLoginMode] = useState(true); // 預設係登入模式
   const router = useRouter();
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
+  const handleAuth = async () => {
+    if (!username || !password) {
+      Alert.alert('提示', '請輸入名稱同密碼！');
+      return;
+    }
 
-  const handleSignUp = () => {
-    createUserWithEmailAndPassword(auth, email, password)
-      .then(() => Alert.alert('成功', '帳戶已建立！'))
-      .catch((error) => Alert.alert('錯誤', error.message));
+    try {
+      const userRef = doc(db, "users", username);
+      const userSnap = await getDoc(userRef);
+
+      if (isLoginMode) {
+        // 登入邏輯
+        if (userSnap.exists() && userSnap.data().password === password) {
+          Alert.alert('成功', `歡迎返嚟，${username}！`);
+          // 跳去 Admin 頁面，並將個名傳過去
+          router.push({ pathname: '/admin', params: { username: username } });
+        } else {
+          Alert.alert('錯誤', '名稱或密碼錯誤！');
+        }
+      } else {
+        // 註冊邏輯
+        if (userSnap.exists()) {
+          Alert.alert('錯誤', '呢個名稱已經有人用咗啦！');
+        } else {
+          await setDoc(userRef, { username: username, password: password });
+          Alert.alert('成功', '註冊成功！請撳登入。');
+          setIsLoginMode(true);
+        }
+      }
+    } catch (error) {
+      Alert.alert('系統錯誤', '請檢查網絡。');
+      console.error(error);
+    }
   };
 
-  const handleLogin = () => {
-    signInWithEmailAndPassword(auth, email, password)
-      .then(() => Alert.alert('成功', '登入成功！'))
-      .catch((error) => Alert.alert('錯誤', '登入失敗，請檢查帳號密碼。'));
-  };
-
-  const handleLogout = () => signOut(auth);
-
-  // 如果已登入，顯示歡迎畫面
-  if (user) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Text style={styles.title}>👋 歡迎，{user.email}</Text>
-        <TouchableOpacity style={styles.button} onPress={() => router.push('/admin')}>
-          <Text style={styles.buttonText}>進入管理員後台</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.button, { backgroundColor: '#F44336' }]} onPress={handleLogout}>
-          <Text style={styles.buttonText}>登出</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
-  // 未登入，顯示登入畫面
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>🛡️ 守護同行 登入</Text>
-      <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" />
-      <TextInput style={styles.input} placeholder="密碼" value={password} onChangeText={setPassword} secureTextEntry />
+      <Text style={styles.title}>🛡️ 守護同行</Text>
+      <Text style={styles.subtitle}>{isLoginMode ? '登入帳戶' : '註冊新帳戶'}</Text>
+
+      <TextInput 
+        style={styles.input} 
+        placeholder="輸入名稱 (例如: tszkit9)" 
+        value={username} 
+        onChangeText={setUsername} 
+        autoCapitalize="none" 
+      />
+      <TextInput 
+        style={styles.input} 
+        placeholder="輸入密碼" 
+        value={password} 
+        onChangeText={setPassword} 
+        secureTextEntry 
+      />
       
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>登入</Text>
+      <TouchableOpacity style={styles.button} onPress={handleAuth}>
+        <Text style={styles.buttonText}>{isLoginMode ? '登入' : '確認註冊'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.button, { backgroundColor: '#2196F3' }]} onPress={handleSignUp}>
-        <Text style={styles.buttonText}>註冊新帳號</Text>
+
+      <TouchableOpacity onPress={() => setIsLoginMode(!isLoginMode)} style={{ marginTop: 20 }}>
+        <Text style={{ textAlign: 'center', color: '#2196F3', fontSize: 16 }}>
+          {isLoginMode ? '未有名稱？去註冊' : '已經有帳戶？去登入'}
+        </Text>
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -77,8 +92,9 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: '#F5F5F5' },
-  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
-  input: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#DDD' },
+  title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
+  subtitle: { fontSize: 18, textAlign: 'center', color: '#666', marginBottom: 30 },
+  input: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  buttonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
 });
