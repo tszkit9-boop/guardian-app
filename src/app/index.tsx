@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, ScrollView, Linking, Pressable, Platform } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -19,7 +19,6 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// 🌟 網頁版專用彈窗（解決 Alert.alert 冇反應問題）
 const showAlert = (title, msg) => {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
   else Alert.alert(title, msg);
@@ -51,7 +50,6 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(0); 
   const timerRef = useRef(null);
 
-  // 錄影
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const cameraRef = useRef(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -60,6 +58,7 @@ export default function App() {
   // 管理員數據
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
+  const [videoList, setVideoList] = useState([]); // 🌟 新增影片列表
   const [allUsers, setAllUsers] = useState([]);
   const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
@@ -72,7 +71,7 @@ export default function App() {
       if (isLoginMode) {
         if (userSnap.exists() && userSnap.data().password === password) {
           setCurrentUser(username);
-          if (username === 'tszkit9') setView('admin'); // 直接入後台
+          if (username === 'tszkit9') setView('admin');
           else setView('guard');
         } else showAlert('錯誤', '名稱或密碼錯誤！');
       } else {
@@ -193,6 +192,7 @@ export default function App() {
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   const startVideoCall = (roomName) => Linking.openURL(`https://meet.jit.si/guardian-${roomName}`);
 
+  // 🌟 管理員實時監聽 (加入影片同刪除 SOS 功能)
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
       const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
@@ -205,9 +205,14 @@ export default function App() {
         snapshot.forEach(doc => alerts.push({ id: doc.id, ...doc.data() }));
         setSosAlerts(alerts);
       });
+      const unsubVideos = onSnapshot(collection(db, "videos"), (snapshot) => {
+        const vids = [];
+        snapshot.forEach(doc => vids.push({ id: doc.id, ...doc.data() }));
+        setVideoList(vids.reverse()); // 最新嘅排最前
+      });
       getDocs(collection(db, "users")).then(snap => { const u=[]; snap.forEach(d => u.push(d.id)); setAllUsers(u); });
       getDocs(collection(db, "admins")).then(snap => { const a=[]; snap.forEach(d => a.push(d.id)); setAdminList(a); });
-      return () => { unsubLoc(); unsubSOS(); };
+      return () => { unsubLoc(); unsubSOS(); unsubVideos(); };
     }
   }, [currentUser, view]);
 
@@ -217,6 +222,13 @@ export default function App() {
     setAdminList([...adminList, newAdminName]);
     setNewAdminName('');
     showAlert('成功', `${newAdminName} 已成為管理員！`);
+  };
+
+  // 🌟 刪除/處理 SOS 警報
+  const resolveSOS = async (id) => {
+    showConfirm('確認處理', '確定要標記為已處理並清除警報嗎？', async () => {
+      await deleteDoc(doc(db, "sos_alerts", id));
+    });
   };
 
   const formatTime = (seconds) => {
@@ -288,7 +300,6 @@ export default function App() {
                 <TextInput style={styles.input} placeholder="例如: 30" value={duration} onChangeText={setDuration} keyboardType="numeric" />
               </View>
               
-              {/* 🌟 改用 Pressable */}
               <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={startGuardian}>
                 <Text style={styles.buttonText}>開始安全陪伴</Text>
               </Pressable>
@@ -344,14 +355,16 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
 
+          {/* 1. 緊急求救區 (加入已處理掣) */}
           {sosAlerts.length > 0 && (
-            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
+            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 2 }]}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
               {sosAlerts.map((alert) => (
-                <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 5 }}>
-                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
-                  <Text>位置：{alert.address}</Text>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                <View key={alert.id} style={{ marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 10 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16 }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
+                  <Text style={{ marginVertical: 5 }}>位置：{alert.address}</Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
                     <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(alert.contactPhone)}>
                       <Text style={styles.buttonText}>📞 致電</Text>
                     </Pressable>
@@ -359,11 +372,17 @@ export default function App() {
                       <Text style={styles.buttonText}>📹 視訊</Text>
                     </Pressable>
                   </View>
+                  
+                  {/* 🌟 新增：處理並刪除警報 */}
+                  <Pressable style={({pressed}) => [styles.button, { marginTop: 10, padding: 10, backgroundColor: '#4CAF50', opacity: pressed ? 0.7 : 1 }]} onPress={() => resolveSOS(alert.id)}>
+                    <Text style={styles.buttonText}>✅ 標記為已處理 (清除警報)</Text>
+                  </Pressable>
                 </View>
               ))}
             </View>
           )}
 
+          {/* 2. 實時監控區 */}
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
             {activeGuardians.length === 0 ? <Text style={{color:'#999'}}>目前無人需要守護。</Text> : 
@@ -390,6 +409,29 @@ export default function App() {
             }
           </View>
 
+          {/* 🌟 3. 新增：證據影片區 */}
+          <View style={styles.card}>
+            <Text style={styles.label}>🎥 用戶錄影證據 ({videoList.length})</Text>
+            {videoList.length === 0 ? <Text style={{color:'#999'}}>暫無影片。</Text> : 
+              videoList.map((v, i) => (
+                <View key={i} style={{ marginTop: 15, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 15 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 用戶：{v.username}</Text>
+                  <Text style={{ color: '#666', fontSize: 12, marginBottom: 10 }}>時間：{new Date(v.timestamp).toLocaleString()}</Text>
+                  
+                  {/* Web 版專用影片播放器 */}
+                  {Platform.OS === 'web' ? (
+                    <video src={v.videoUrl} controls style={{ width: '100%', borderRadius: 8, maxHeight: 200, backgroundColor: '#000' }} />
+                  ) : (
+                    <Pressable style={styles.button} onPress={() => Linking.openURL(v.videoUrl)}>
+                      <Text style={styles.buttonText}>📺 點擊播放影片</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ))
+            }
+          </View>
+
+          {/* 4. 管理員名單 */}
           <View style={styles.card}>
             <Text style={styles.label}>👑 新增管理員</Text>
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
@@ -422,7 +464,7 @@ const styles = StyleSheet.create({
   pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 15 },
   subtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
   card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-  label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 5 },
+  label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   locationText: { fontSize: 16, color: '#333', fontWeight: '500', marginTop: 5 },
   input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
