@@ -18,12 +18,14 @@ const db = getFirestore(app);
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-const [view, setView] = useState(() => {
-  if (typeof window !== 'undefined' && window.location.pathname.includes('/admin')) {
-    return 'admin';
-  }
-  return 'guard';
-});
+  
+  // 🌟 自動偵測網址
+  const [view, setView] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.includes('/admin')) {
+      return 'admin';
+    }
+    return 'guard';
+  });
   
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
@@ -194,7 +196,8 @@ const [view, setView] = useState(() => {
       <View style={styles.header}>
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          {currentUser === 'tszkit9' && (
+          
+          {/* 🌟 已修復：移除重複嘅 Tag */}
           {currentUser === 'tszkit9' && (
             <TouchableOpacity 
               onPress={() => {
@@ -209,9 +212,7 @@ const [view, setView] = useState(() => {
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
             </TouchableOpacity>
           )}
-              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
-            </TouchableOpacity>
-          )}
+
           <TouchableOpacity onPress={() => { setCurrentUser(null); setView('guard'); }} style={[styles.navBtn, { backgroundColor: '#F44336' }]}>
             <Text style={styles.navBtnText}>登出</Text>
           </TouchableOpacity>
