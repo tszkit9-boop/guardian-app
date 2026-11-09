@@ -259,16 +259,28 @@ export default function App() {
       )}
 
       {view === 'admin' && currentUser === 'tszkit9' && (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
-          <Text style={{ color: '#FFF', fontSize: 24 }}>👑 你已成功進入後台！</Text>
-          <TouchableOpacity 
-            style={[styles.button, { marginTop: 20 }]} 
-            onPress={() => setView('guard')}
-          >
-            <Text style={styles.buttonText}>返回首頁</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        <ScrollView contentContainerStyle={styles.content}>
+          <Text style={styles.pageTitle}>👑 管理員控制台</Text>
+
+          {sosAlerts.length > 0 && (
+            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
+              <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
+              {sosAlerts.map((alert) => (
+                <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 5 }}>
+                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
+                  <Text>位置：{alert.address}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F' }]} onPress={() => callPhone(alert.contactPhone)}>
+                      <Text style={styles.buttonText}>📞 致電</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(alert.username)}>
+                      <Text style={styles.buttonText}>📹 視訊</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
 
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
@@ -279,9 +291,8 @@ export default function App() {
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
                   
-                  {/* 我哋用簡單文字連結代替地圖，保證唔會死機 */}
                   <TouchableOpacity onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
-                    <Text style={{ color: '#2196F3', marginTop: 5 }}>🗺️ 喺 Google Maps 睇位置</Text>
+                    <Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text>
                   </TouchableOpacity>
 
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
@@ -302,6 +313,12 @@ export default function App() {
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
             <TouchableOpacity style={styles.button} onPress={addAdmin}><Text style={styles.buttonText}>確認新增</Text></TouchableOpacity>
           </View>
+
+          <View style={styles.card}>
+            <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
+            <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
+          </View>
+
         </ScrollView>
       )}
     </SafeAreaView>
