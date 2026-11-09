@@ -1,8 +1,8 @@
 // @ts-nocheck
-import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView } from 'react-native';
+import { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView, Linking } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import * as Location from 'expo-location';
 
 const firebaseConfig = {
@@ -20,20 +20,25 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [view, setView] = useState('guard');
   
+  // 登入/註冊狀態
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
+  // 守護功能狀態
   const [destination, setDestination] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [isGuarding, setIsGuarding] = useState(false);
-  
-  // 🌟 修改咗預設文字
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
 
-  const [newAdminName, setNewAdminName] = useState('');
+  // 後台管理狀態
+  const [activeGuardians, setActiveGuardians] = useState([]);
+  const [sosAlerts, setSosAlerts] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [adminList, setAdminList] = useState([]);
+  const [newAdminName, setNewAdminName] = useState('');
 
+  // 登入/註冊
   const handleAuth = async () => {
     if (!username || !password) return Alert.alert('提示', '請輸入名稱同密碼！');
     try {
@@ -44,7 +49,6 @@ export default function App() {
         if (userSnap.exists() && userSnap.data().password === password) {
           setCurrentUser(username);
           setView('guard');
-          if (username === 'tszkit9') fetchAdmins();
         } else {
           Alert.alert('錯誤', '名稱或密碼錯誤！');
         }
@@ -62,70 +66,117 @@ export default function App() {
     }
   };
 
+  // 開始守護
   const startGuardian = async () => {
-    if (!destination) return Alert.alert('提示', '請輸入目的地！');
-    if (!contactPhone) return Alert.alert('提示', '請輸入緊急聯絡人電話！');
-
+    if (!destination || !contactPhone) return Alert.alert('提示', '請填寫目的地同聯絡人！');
     setLocationText('正在獲取位置及地址...');
 
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setLocationText('定位失敗：沒有權限');
-        return Alert.alert('錯誤', '需要定位權限！');
-      }
+      if (status !== 'granted') return Alert.alert('錯誤', '需要定位權限！');
 
       let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = loc.coords;
 
-      // 🌟 新增：將經緯度翻譯做真實地址
-      let addressString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`; // 預設備用
+      let addressString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
       try {
         let geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
         if (geocode.length > 0) {
           const addr = geocode[0];
-          // 砌出香港格式地址（例如：香港 九龍城區 亞皆老街）
-          addressString = `${addr.region || ''} ${addr.city || ''} ${addr.district || ''} ${addr.street || ''} ${addr.name || ''}`.trim();
+          addressString = `${addr.region || ''} ${addr.city || ''} ${addr.district || ''} ${addr.street || ''}`.trim();
         }
-      } catch (geoError) {
-        console.log("地址翻譯失敗，使用經緯度", geoError);
-      }
+      } catch (e) {}
 
-      // 上傳去 Firebase
-      await setDoc(doc(db, "locations", "user1"), {
+      await setDoc(doc(db, "locations", currentUser), {
+        username: currentUser,
         lat: latitude,
         lng: longitude,
-        address: addressString, // 🌟 存入地址
+        address: addressString,
         destination: destination,
         contactPhone: contactPhone,
         updatedAt: new Date().toISOString()
       });
 
-      // 🌟 畫面顯示地址
       setLocationText(`已定位：${addressString}`);
       setIsGuarding(true);
-      Alert.alert('守護開始', `正在守護你前往：${destination}\n位置：${addressString}`);
     } catch (error) {
-      console.error(error);
       setLocationText('定位出錯');
-      Alert.alert('錯誤', '無法獲取定位。');
     }
   };
 
-  const fetchAdmins = async () => {
-    const querySnapshot = await getDocs(collection(db, "admins"));
-    const names = [];
-    querySnapshot.forEach((doc) => names.push(doc.id));
-    setAdminList(names);
+  // 結束守護
+  const stopGuardian = async () => {
+    await setDoc(doc(db, "locations", currentUser), { status: 'arrived' }, { merge: true });
+    setIsGuarding(false);
+    setLocationText('僅在你同意後分享定位');
+    Alert.alert('安全抵達', '已通知後台你安全抵達。');
   };
+
+  // 觸發 SOS
+  const triggerSOS = async () => {
+    Alert.alert('確認求救', '確定要發出緊急求救嗎？', [
+      { text: '取消', style: 'cancel' },
+      { text: '確定', style: 'destructive', onPress: async () => {
+          await addDoc(collection(db, "sos_alerts"), {
+            username: currentUser,
+            address: locationText,
+            contactPhone: contactPhone,
+            timestamp: serverTimestamp()
+          });
+          Alert.alert('求救已發出', '管理員已收到通知！');
+      }}
+    ]);
+  };
+
+  // 視像通話 (Jitsi)
+  const startVideoCall = () => {
+    Linking.openURL(`https://meet.jit.si/guardian-room-${currentUser}`);
+  };
+
+  // 🔥 管理員專用：實時監聽 Firebase 數據
+  useEffect(() => {
+    if (currentUser === 'tszkit9' && view === 'admin') {
+      // 1. 監聽守護中嘅用戶
+      const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
+        const locs = [];
+        snapshot.forEach(doc => {
+          if (doc.data().status !== 'arrived') locs.push(doc.data());
+        });
+        setActiveGuardians(locs);
+      });
+
+      // 2. 監聽 SOS
+      const unsubSOS = onSnapshot(collection(db, "sos_alerts"), (snapshot) => {
+        const alerts = [];
+        snapshot.forEach(doc => alerts.push({ id: doc.id, ...doc.data() }));
+        setSosAlerts(alerts);
+      });
+
+      // 3. 攞所有用戶同 Admin
+      getDocs(collection(db, "users")).then(snap => {
+        const users = [];
+        snap.forEach(doc => users.push(doc.id));
+        setAllUsers(users);
+      });
+      getDocs(collection(db, "admins")).then(snap => {
+        const admins = [];
+        snap.forEach(doc => admins.push(doc.id));
+        setAdminList(admins);
+      });
+
+      return () => { unsubLoc(); unsubSOS(); };
+    }
+  }, [currentUser, view]);
 
   const addAdmin = async () => {
     if (!newAdminName) return Alert.alert('請輸入名稱');
     await setDoc(doc(db, "admins", newAdminName), { role: "admin" });
-    Alert.alert('成功', `${newAdminName} 已成為管理員！`);
+    setAdminList([...adminList, newAdminName]);
     setNewAdminName('');
-    fetchAdmins();
+    Alert.alert('成功', `${newAdminName} 已成為管理員！`);
   };
+
+  // ================= 介面 =================
 
   if (!currentUser) {
     return (
@@ -148,6 +199,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.mainContainer}>
+      {/* 頂部導航 */}
       <View style={styles.header}>
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -162,41 +214,43 @@ export default function App() {
         </View>
       </View>
 
+      {/* 用戶守護介面 */}
       {view === 'guard' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>守護同行 Guardian</Text>
-          <Text style={styles.subtitle}>晚上 10:30 · 準備回家了嗎？</Text>
-
+          
           <View style={styles.card}>
             <Text style={styles.label}>📍 現在位置</Text>
-            {/* 呢度會顯示真實地址 */}
             <Text style={styles.locationText}>{locationText}</Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>🏠 目的地</Text>
-            <TextInput style={styles.input} placeholder="輸入安全抵達地點" value={destination} onChangeText={setDestination} />
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.label}>📞 緊急聯絡人電話</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="例如: 91234567" 
-              value={contactPhone} 
-              onChangeText={setContactPhone} 
-              keyboardType="phone-pad" 
-            />
-          </View>
-
           {!isGuarding ? (
-            <TouchableOpacity style={styles.button} onPress={startGuardian}>
-              <Text style={styles.buttonText}>開始安全陪伴</Text>
-            </TouchableOpacity>
+            <>
+              <View style={styles.card}>
+                <Text style={styles.label}>🏠 目的地</Text>
+                <TextInput style={styles.input} placeholder="輸入安全抵達地點" value={destination} onChangeText={setDestination} />
+              </View>
+              <View style={styles.card}>
+                <Text style={styles.label}>📞 緊急聯絡人電話</Text>
+                <TextInput style={styles.input} placeholder="例如: 91234567" value={contactPhone} onChangeText={setContactPhone} keyboardType="phone-pad" />
+              </View>
+              <TouchableOpacity style={styles.button} onPress={startGuardian}>
+                <Text style={styles.buttonText}>開始安全陪伴</Text>
+              </TouchableOpacity>
+            </>
           ) : (
             <View style={styles.guardingBox}>
-              <Text style={styles.guardingText}>🛡️ 守護中...</Text>
-              <TouchableOpacity style={[styles.button, styles.stopButton]} onPress={() => setIsGuarding(false)}>
+              <Text style={styles.guardingText}>🛡️ 守護中...前往 {destination}</Text>
+              
+              <TouchableOpacity style={[styles.button, { backgroundColor: '#2196F3' }]} onPress={startVideoCall}>
+                <Text style={styles.buttonText}>📹 發起視像通話</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.button, { backgroundColor: '#D32F2F', marginTop: 15 }]} onPress={triggerSOS}>
+                <Text style={styles.buttonText}>🚨 我感覺不安全 (SOS)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.button, styles.stopButton]} onPress={stopGuardian}>
                 <Text style={styles.buttonText}>我已安全抵達</Text>
               </TouchableOpacity>
             </View>
@@ -204,23 +258,53 @@ export default function App() {
         </ScrollView>
       )}
 
-      {view === 'admin' && (
+      {/* 管理員後台介面 */}
+      {view === 'admin' && currentUser === 'tszkit9' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
-          
+
+          {/* 1. SOS 緊急求救區 */}
+          {sosAlerts.length > 0 && (
+            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
+              <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
+              {sosAlerts.map((alert) => (
+                <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 5 }}>
+                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username}</Text>
+                  <Text>位置：{alert.address}</Text>
+                  <Text>聯絡人：{alert.contactPhone}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 2. 實時守護監控區 */}
           <View style={styles.card}>
-            <Text style={styles.label}>新增管理員 (輸入名稱)：</Text>
+            <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
+            {activeGuardians.length === 0 ? <Text style={{color:'#999'}}>目前無人需要守護。</Text> : 
+              activeGuardians.map((g, i) => (
+                <View key={i} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 10 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 {g.username}</Text>
+                  <Text>目的地：{g.destination}</Text>
+                  <Text>位置：{g.address}</Text>
+                  <Text>聯絡人：{g.contactPhone}</Text>
+                </View>
+              ))
+            }
+          </View>
+
+          {/* 3. 管理員設定區 */}
+          <View style={styles.card}>
+            <Text style={styles.label}>👑 新增管理員</Text>
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
             <TouchableOpacity style={styles.button} onPress={addAdmin}>
               <Text style={styles.buttonText}>確認新增</Text>
             </TouchableOpacity>
+            <Text style={{ marginTop: 10, color: '#666' }}>目前名單：{adminList.join(', ') || '無'}</Text>
           </View>
 
+          {/* 4. 用戶總覽區 */}
           <View style={styles.card}>
-            <Text style={styles.label}>目前管理員名單：</Text>
-            <ScrollView style={{ maxHeight: 200 }}>
-              {adminList.map((name) => <Text key={name} style={styles.listItem}>• {name}</Text>)}
-            </ScrollView>
+            <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
           </View>
         </ScrollView>
       )}
@@ -237,16 +321,16 @@ const styles = StyleSheet.create({
   navBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
   content: { padding: 20 },
   title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
-  pageTitle: { fontSize: 28, fontWeight: 'bold', color: '#333', marginBottom: 5 },
+  pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 15 },
   subtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
   card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
   label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 5 },
   locationText: { fontSize: 16, color: '#333', fontWeight: '500', marginTop: 5 },
   input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-  buttonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   guardingBox: { backgroundColor: '#E8F5E9', padding: 20, borderRadius: 10, marginTop: 20 },
   guardingText: { fontSize: 18, fontWeight: 'bold', color: '#2E7D32', textAlign: 'center', marginBottom: 10 },
-  stopButton: { backgroundColor: '#FF9800' },
+  stopButton: { backgroundColor: '#FF9800', marginTop: 15 },
   listItem: { fontSize: 16, color: '#333', marginBottom: 5 }
 });
