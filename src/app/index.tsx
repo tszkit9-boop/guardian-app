@@ -259,28 +259,16 @@ export default function App() {
       )}
 
       {view === 'admin' && currentUser === 'tszkit9' && (
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.pageTitle}>👑 管理員控制台</Text>
-
-          {sosAlerts.length > 0 && (
-            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
-              <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
-              {sosAlerts.map((alert) => (
-                <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 5 }}>
-                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
-                  <Text>位置：{alert.address}</Text>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F' }]} onPress={() => callPhone(alert.contactPhone)}>
-                      <Text style={styles.buttonText}>📞 致電</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(alert.username)}>
-                      <Text style={styles.buttonText}>📹 視訊</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+          <Text style={{ color: '#FFF', fontSize: 24 }}>👑 你已成功進入後台！</Text>
+          <TouchableOpacity 
+            style={[styles.button, { marginTop: 20 }]} 
+            onPress={() => setView('guard')}
+          >
+            <Text style={styles.buttonText}>返回首頁</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
