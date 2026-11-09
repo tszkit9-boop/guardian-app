@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView, Linking } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc } from 'firebase/firestore';
 import * as Location from 'expo-location';
 
 const firebaseConfig = {
@@ -26,11 +26,9 @@ export default function App() {
 
   const [destination, setDestination] = useState('');
   const [contactPhone, setContactPhone] = useState('');
-  const [duration, setDuration] = useState('30'); // 🌟 預計幾多分鐘
+  const [duration, setDuration] = useState('30');
   const [isGuarding, setIsGuarding] = useState(false);
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
-  
-  // 🌟 倒數計時狀態
   const [timeLeft, setTimeLeft] = useState(0); 
   const timerRef = useRef(null);
 
@@ -40,7 +38,6 @@ export default function App() {
   const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
 
-  // 登入/註冊
   const handleAuth = async () => {
     if (!username || !password) return Alert.alert('提示', '請輸入名稱同密碼！');
     try {
@@ -62,7 +59,6 @@ export default function App() {
     } catch (e) { Alert.alert('錯誤', '網絡問題。'); }
   };
 
-  // 開始守護
   const startGuardian = async () => {
     if (!destination || !contactPhone) return Alert.alert('提示', '請填寫目的地同聯絡人！');
     const minutes = parseInt(duration);
@@ -87,31 +83,20 @@ export default function App() {
       } catch (e) {}
 
       await setDoc(doc(db, "locations", currentUser), {
-        username: currentUser,
-        lat: latitude,
-        lng: longitude,
-        address: addressString,
-        destination: destination,
-        contactPhone: contactPhone,
-        status: 'guarding',
-        updatedAt: new Date().toISOString()
+        username: currentUser, lat: latitude, lng: longitude, address: addressString,
+        destination: destination, contactPhone: contactPhone, status: 'guarding', updatedAt: new Date().toISOString()
       });
 
       setLocationText(`已定位：${addressString}`);
       setIsGuarding(true);
-      setTimeLeft(minutes * 60); // 🌟 設定倒數秒數
-      
+      setTimeLeft(minutes * 60); 
     } catch (error) { setLocationText('定位出錯'); }
   };
 
-  // 🌟 倒數計時器邏輯
   useEffect(() => {
     if (isGuarding && timeLeft > 0) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
+      timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
     } else if (isGuarding && timeLeft === 0) {
-      // 時間到，自動觸發 SOS！
       clearInterval(timerRef.current);
       autoTriggerSOS();
     }
@@ -121,11 +106,7 @@ export default function App() {
   const autoTriggerSOS = async () => {
     Alert.alert('⚠️ 逾時警告', '你已超過預計時間未報平安，系統已自動發出求救！');
     await addDoc(collection(db, "sos_alerts"), {
-      username: currentUser,
-      address: locationText,
-      contactPhone: contactPhone,
-      isAuto: true, // 標記為自動發出
-      timestamp: serverTimestamp()
+      username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: true
     });
   };
 
@@ -144,7 +125,7 @@ export default function App() {
       { text: '確定', style: 'destructive', onPress: async () => {
           clearInterval(timerRef.current);
           await addDoc(collection(db, "sos_alerts"), {
-            username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false, timestamp: serverTimestamp()
+            username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false
           });
           Alert.alert('求救已發出', '管理員已收到通知！');
       }}
@@ -154,7 +135,6 @@ export default function App() {
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   const startVideoCall = (roomName) => Linking.openURL(`https://meet.jit.si/guardian-${roomName}`);
 
-  // Admin 數據監聽
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
       const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
@@ -181,14 +161,11 @@ export default function App() {
     Alert.alert('成功', `${newAdminName} 已成為管理員！`);
   };
 
-  // 格式化時間 (例如 30:00)
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
     const s = (seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
-
-  // ================= 介面 =================
 
   if (!currentUser) {
     return (
@@ -217,13 +194,12 @@ export default function App() {
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={() => setCurrentUser(null)} style={[styles.navBtn, { backgroundColor: '#F44336' }]}>
+          <TouchableOpacity onPress={() => { setCurrentUser(null); setView('guard'); }} style={[styles.navBtn, { backgroundColor: '#F44336' }]}>
             <Text style={styles.navBtnText}>登出</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 用戶守護介面 */}
       {view === 'guard' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>守護同行 Guardian</Text>
@@ -255,13 +231,11 @@ export default function App() {
             <View style={styles.guardingBox}>
               <Text style={styles.guardingText}>🛡️ 守護中...前往 {destination}</Text>
               
-              {/* 🌟 倒數計時顯示 */}
               <View style={{ alignItems: 'center', marginVertical: 15 }}>
                 <Text style={{ fontSize: 16, color: '#666' }}>預計剩餘時間</Text>
                 <Text style={{ fontSize: 48, fontWeight: 'bold', color: timeLeft < 300 ? '#D32F2F' : '#2E7D32' }}>
                   {formatTime(timeLeft)}
                 </Text>
-                {timeLeft < 300 && <Text style={{ color: '#D32F2F', fontSize: 12 }}>⚠️ 時間即將屆滿，請盡快報平安！</Text>}
               </View>
 
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
@@ -284,25 +258,23 @@ export default function App() {
         </ScrollView>
       )}
 
-      {/* 管理員後台介面 */}
       {view === 'admin' && currentUser === 'tszkit9' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
 
-          {/* SOS 求救區 */}
           {sosAlerts.length > 0 && (
             <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
               {sosAlerts.map((alert) => (
                 <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 5 }}>
-                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時自動發出)'}</Text>
+                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
                   <Text>位置：{alert.address}</Text>
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
                     <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F' }]} onPress={() => callPhone(alert.contactPhone)}>
-                      <Text style={styles.buttonText}>📞 致電聯絡人</Text>
+                      <Text style={styles.buttonText}>📞 致電</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(alert.username)}>
-                      <Text style={styles.buttonText}>📹 加入視訊</Text>
+                      <Text style={styles.buttonText}>📹 視訊</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -310,7 +282,6 @@ export default function App() {
             </View>
           )}
 
-          {/* 🌟 實時守護監控區 (加入真實地圖) */}
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
             {activeGuardians.length === 0 ? <Text style={{color:'#999'}}>目前無人需要守護。</Text> : 
@@ -320,21 +291,17 @@ export default function App() {
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
                   
-                  {/* 🌟 Google Maps 嵌入地圖 */}
-                  <View style={{ height: 150, marginTop: 10, borderRadius: 10, overflow: 'hidden' }}>
-                    {React.createElement('iframe', {
-                      src: `https://maps.google.com/maps?q=${g.lat},${g.lng}&z=16&output=embed`,
-                      style: { width: '100%', height: '100%', border: 0 },
-                      allowFullScreen: true
-                    })}
-                  </View>
+                  {/* 我哋用簡單文字連結代替地圖，保證唔會死機 */}
+                  <TouchableOpacity onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
+                    <Text style={{ color: '#2196F3', marginTop: 5 }}>🗺️ 喺 Google Maps 睇位置</Text>
+                  </TouchableOpacity>
 
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
                     <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3' }]} onPress={() => callPhone(g.contactPhone)}>
-                      <Text style={styles.buttonText}>📞 致電聯絡人</Text>
+                      <Text style={styles.buttonText}>📞 致電</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(g.username)}>
-                      <Text style={styles.buttonText}>📹 加入視訊</Text>
+                      <Text style={styles.buttonText}>📹 視訊</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
