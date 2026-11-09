@@ -46,12 +46,7 @@ export default function App() {
       if (isLoginMode) {
         if (userSnap.exists() && userSnap.data().password === password) {
           setCurrentUser(username);
-          // 🌟 終極霸道邏輯：只要你係 tszkit9，登入即自動入後台！
-          if (username === 'tszkit9') {
-            setView('admin');
-          } else {
-            setView('guard');
-          }
+          setView('guard'); // 預設登入去守護頁
         } else Alert.alert('錯誤', '名稱或密碼錯誤！');
       } else {
         if (userSnap.exists()) Alert.alert('錯誤', '名稱已被使用！');
@@ -140,6 +135,7 @@ export default function App() {
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   const startVideoCall = (roomName) => Linking.openURL(`https://meet.jit.si/guardian-${roomName}`);
 
+  // Admin 監聽器
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
       const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
@@ -193,25 +189,21 @@ export default function App() {
     <SafeAreaView style={styles.mainContainer}>
       <View style={styles.header}>
         <Text style={styles.headerText}>👤 {currentUser}</Text>
-        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-          
-          {/* 🌟 如果係 tszkit9，提供切換掣。為咗防止被頂部導航欄擋住，加高 zIndex 同 margin */}
+        <View style={{ flexDirection: 'row', gap: 10 }}>
           {currentUser === 'tszkit9' && (
             <Pressable 
               onPress={() => setView(view === 'guard' ? 'admin' : 'guard')} 
-              style={({ pressed }) => [styles.navBtn, { zIndex: 9999, opacity: pressed ? 0.7 : 1 }]}
+              style={({ pressed }) => [styles.navBtn, { backgroundColor: view === 'admin' ? '#FF9800' : '#2196F3', opacity: pressed ? 0.7 : 1 }]}
             >
-              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 進入後台' : '🏠 返回守護'}</Text>
+              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回守護'}</Text>
             </Pressable>
           )}
-
           <Pressable 
             onPress={() => { setCurrentUser(null); setView('guard'); }} 
-            style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', zIndex: 9999, opacity: pressed ? 0.7 : 1 }]}
+            style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', opacity: pressed ? 0.7 : 1 }]}
           >
             <Text style={styles.navBtnText}>登出</Text>
           </Pressable>
-          
         </View>
       </View>
 
@@ -277,19 +269,20 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
 
+          {/* 🚨 求救區塊 */}
           {sosAlerts.length > 0 && (
-            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 1 }]}>
+            <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 2 }]}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
               {sosAlerts.map((alert) => (
-                <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 5 }}>
-                  <Text style={{ fontWeight: 'bold' }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
-                  <Text>位置：{alert.address}</Text>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F' }]} onPress={() => callPhone(alert.contactPhone)}>
-                      <Text style={styles.buttonText}>📞 致電</Text>
+                <View key={alert.id} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#FFCDD2', paddingBottom: 10 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16 }}>用戶：{alert.username} {alert.isAuto && '(逾時自動發出)'}</Text>
+                  <Text style={{ marginVertical: 5 }}>位置：{alert.address}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
+                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 10, backgroundColor: '#D32F2F' }]} onPress={() => callPhone(alert.contactPhone)}>
+                      <Text style={styles.buttonText}>📞 致電聯絡人</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(alert.username)}>
-                      <Text style={styles.buttonText}>📹 視訊</Text>
+                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 10, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(alert.username)}>
+                      <Text style={styles.buttonText}>📹 加入視訊</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -297,42 +290,52 @@ export default function App() {
             </View>
           )}
 
+          {/* 📍 實時監控區塊 */}
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
-            {activeGuardians.length === 0 ? <Text style={{color:'#999'}}>目前無人需要守護。</Text> : 
+            {activeGuardians.length === 0 ? (
+              <Text style={{color:'#999', textAlign: 'center', marginVertical: 20}}>目前無人需要守護。</Text>
+            ) : (
               activeGuardians.map((g, i) => (
-                <View key={i} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 10 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 {g.username}</Text>
-                  <Text>目的地：{g.destination}</Text>
-                  <Text>位置：{g.address}</Text>
+                <View key={i} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 15 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 18, color: '#333' }}>👤 {g.username}</Text>
+                  <Text style={{ marginTop: 5 }}>🏠 目的地：{g.destination}</Text>
+                  <Text>📍 位置：{g.address}</Text>
                   
                   <TouchableOpacity onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
-                    <Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text>
+                    <Text style={{ color: '#2196F3', marginTop: 10, fontWeight: 'bold', fontSize: 16 }}>🗺️ 喺 Google Maps 睇位置</Text>
                   </TouchableOpacity>
 
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3' }]} onPress={() => callPhone(g.contactPhone)}>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
+                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 10, backgroundColor: '#2196F3' }]} onPress={() => callPhone(g.contactPhone)}>
                       <Text style={styles.buttonText}>📞 致電</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(g.username)}>
+                    <TouchableOpacity style={[styles.button, { flex: 1, padding: 10, backgroundColor: '#9C27B0' }]} onPress={() => startVideoCall(g.username)}>
                       <Text style={styles.buttonText}>📹 視訊</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ))
-            }
+            )}
           </View>
 
+          {/* 👑 管理員設定 */}
           <View style={styles.card}>
             <Text style={styles.label}>👑 新增管理員</Text>
-            <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
-            <TouchableOpacity style={styles.button} onPress={addAdmin}><Text style={styles.buttonText}>確認新增</Text></TouchableOpacity>
-            <Text style={{ marginTop: 10, color: '#666' }}>名單：{adminList.join(', ')}</Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TextInput style={[styles.input, { flex: 1 }]} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
+              <TouchableOpacity style={[styles.button, { marginTop: 5, paddingHorizontal: 20 }]} onPress={addAdmin}>
+                <Text style={styles.buttonText}>新增</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{ marginTop: 15, color: '#333', fontWeight: '500' }}>目前管理員名單：</Text>
+            <Text style={{ marginTop: 5, color: '#666' }}>{adminList.join(', ') || '暫無'}</Text>
           </View>
 
+          {/* 👥 用戶總覽 */}
           <View style={styles.card}>
             <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
-            <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
+            <Text style={{color: '#666', fontSize: 14, marginTop: 10, lineHeight: 22}}>名單：{allUsers.join(', ')}</Text>
           </View>
 
         </ScrollView>
@@ -343,19 +346,19 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: '#F5F5F5' },
-  mainContainer: { flex: 1, backgroundColor: '#F5F5F5', zIndex: 1 }, // 提升層級
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#DDD', zIndex: 99 }, // 提升層級
+  mainContainer: { flex: 1, backgroundColor: '#F5F5F5' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#DDD', zIndex: 99 },
   headerText: { fontSize: 16, fontWeight: 'bold' },
-  navBtn: { backgroundColor: '#2196F3', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, cursor: 'pointer' },
-  navBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  navBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, cursor: 'pointer' },
+  navBtnText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
   content: { padding: 20 },
   title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
-  pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 15 },
+  pageTitle: { fontSize: 28, fontWeight: 'bold', color: '#333', marginBottom: 20 },
   subtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
-  card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-  label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 5 },
+  card: { backgroundColor: '#FFF', padding: 20, borderRadius: 12, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
+  label: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   locationText: { fontSize: 16, color: '#333', fontWeight: '500', marginTop: 5 },
-  input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
+  input: { backgroundColor: '#F9F9F9', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
   buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   guardingBox: { backgroundColor: '#E8F5E9', padding: 20, borderRadius: 10, marginTop: 20 },
