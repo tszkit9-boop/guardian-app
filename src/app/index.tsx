@@ -188,9 +188,11 @@ export default function App() {
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           {currentUser === 'tszkit9' && (
-            <TouchableOpacity onPress={() => { window.alert("撳到了！"); setView(view === 'guard' ? 'admin' : 'guard'); }} style={styles.navBtn}>
-              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
-            </TouchableOpacity>
+            <a href="/admin" style={{ textDecoration: 'none' }}>
+              <View style={styles.navBtn}>
+                <Text style={styles.navBtnText}>⚙️ 管理員後台</Text>
+              </View>
+            </a>
           )}
           <TouchableOpacity onPress={() => { setCurrentUser(null); setView('guard'); }} style={[styles.navBtn, { backgroundColor: '#F44336' }]}>
             <Text style={styles.navBtnText}>登出</Text>
