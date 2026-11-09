@@ -18,15 +18,7 @@ const db = getFirestore(app);
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-  
-  // 🌟 支援網址直接進入後台 (?admin=true)
-  const [view, setView] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const url = window.location.href;
-      if (url.includes('/admin') || url.includes('admin=true')) return 'admin';
-    }
-    return 'guard';
-  });
+  const [view, setView] = useState('guard');
   
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
@@ -54,7 +46,12 @@ export default function App() {
       if (isLoginMode) {
         if (userSnap.exists() && userSnap.data().password === password) {
           setCurrentUser(username);
-          setView('guard');
+          // 🌟 終極霸道邏輯：只要你係 tszkit9，登入即自動入後台！
+          if (username === 'tszkit9') {
+            setView('admin');
+          } else {
+            setView('guard');
+          }
         } else Alert.alert('錯誤', '名稱或密碼錯誤！');
       } else {
         if (userSnap.exists()) Alert.alert('錯誤', '名稱已被使用！');
@@ -198,25 +195,19 @@ export default function App() {
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           
-          {/* 🌟 使用 Pressable 確保 Web 點擊 100% 成功 */}
+          {/* 🌟 如果係 tszkit9，提供切換掣。為咗防止被頂部導航欄擋住，加高 zIndex 同 margin */}
           {currentUser === 'tszkit9' && (
             <Pressable 
-              onPress={() => {
-                const newView = view === 'guard' ? 'admin' : 'guard';
-                setView(newView);
-                if (typeof window !== 'undefined') {
-                  window.history.pushState({}, '', newView === 'admin' ? '/?admin=true' : '/');
-                }
-              }} 
-              style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.7 : 1 }]}
+              onPress={() => setView(view === 'guard' ? 'admin' : 'guard')} 
+              style={({ pressed }) => [styles.navBtn, { zIndex: 9999, opacity: pressed ? 0.7 : 1 }]}
             >
-              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
+              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 進入後台' : '🏠 返回守護'}</Text>
             </Pressable>
           )}
 
           <Pressable 
             onPress={() => { setCurrentUser(null); setView('guard'); }} 
-            style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', opacity: pressed ? 0.7 : 1 }]}
+            style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', zIndex: 9999, opacity: pressed ? 0.7 : 1 }]}
           >
             <Text style={styles.navBtnText}>登出</Text>
           </Pressable>
@@ -352,8 +343,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: '#F5F5F5' },
-  mainContainer: { flex: 1, backgroundColor: '#F5F5F5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#DDD' },
+  mainContainer: { flex: 1, backgroundColor: '#F5F5F5', zIndex: 1 }, // 提升層級
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#DDD', zIndex: 99 }, // 提升層級
   headerText: { fontSize: 16, fontWeight: 'bold' },
   navBtn: { backgroundColor: '#2196F3', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, cursor: 'pointer' },
   navBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
