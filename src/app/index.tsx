@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
+import { Pressable } from 'react-native'; // 🌟 加呢句
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView, Linking } from 'react-native';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc } from 'firebase/firestore';
