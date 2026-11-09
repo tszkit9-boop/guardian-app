@@ -1,6 +1,23 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, SafeAreaView, Alert, Platform } from 'react-native';
 import * as Location from 'expo-location';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
+
+// ⚠️ 呢度貼你個 Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyAZNQcRCFis8e3aYy7b3nxd8pafzNgYw",
+  authDomain: "guardian-app-f23c6.firebaseapp.com",
+  projectId: "guardian-app-f23c6",
+  storageBucket: "guardian-app-f23c6.firebasestorage.app",
+  messagingSenderId: "1075988300124",
+  appId: "1:1075988300124:web:59be47526be9800e6e60199",
+  measurementId: "G-G09P2K8SXH"
+};
+
+// 初始化 Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 export default function HomeScreen() {
   const [destination, setDestination] = useState('');
@@ -13,10 +30,9 @@ export default function HomeScreen() {
       return;
     }
 
-    setLocationText('獲取定位中...');
+    setLocationText('獲取定位並上傳中...');
 
     try {
-      // 1. 請求權限
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('錯誤', '需要定位權限才能守護你！');
@@ -24,24 +40,29 @@ export default function HomeScreen() {
         return;
       }
 
-      // 2. 獲取真實位置 (Web 版會用瀏覽器定位，手機版會用 GPS)
       let location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
 
       const { latitude, longitude } = location.coords;
       
-      // 3. 更新畫面顯示
-      setLocationText(`已定位：${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      // 🔥 呢句就係將數據射上 Firebase 嘅關鍵！🔥
+      await setDoc(doc(db, "locations", "user1"), {
+        lat: latitude,
+        lng: longitude,
+        destination: destination,
+        updatedAt: new Date().toISOString()
+      });
+
+      setLocationText(`已定位並上傳：${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
       setIsGuarding(true);
       
-      // 彈出提示
-      Alert.alert('守護開始', `正在守護你前往：${destination}\n座標：${latitude}, ${longitude}`);
+      Alert.alert('守護開始', `正在守護你前往：${destination}\n數據已上傳到後台！`);
       
     } catch (error) {
       console.error(error);
-      setLocationText('定位出錯');
-      Alert.alert('錯誤', '無法獲取定位，請確保瀏覽器已允許定位權限。');
+      setLocationText('定位或上傳出錯');
+      Alert.alert('錯誤', '無法獲取定位或上傳，請檢查網絡。');
     }
   };
 
