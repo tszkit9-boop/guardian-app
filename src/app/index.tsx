@@ -18,7 +18,7 @@ const db = getFirestore(app);
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [view, setView] = useState('guard');
+  const [view, setView] = useState('guard'); // 'guard' 或 'admin'
   
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
@@ -34,8 +34,9 @@ export default function App() {
 
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
-  const [newAdminName, setNewAdminName] = useState('');
+  const [allUsers, setAllUsers] = useState([]);
   const [adminList, setAdminList] = useState([]);
+  const [newAdminName, setNewAdminName] = useState('');
 
   const handleAuth = async () => {
     if (!username || !password) return Alert.alert('提示', '請輸入名稱同密碼！');
@@ -146,6 +147,7 @@ export default function App() {
         snapshot.forEach(doc => alerts.push({ id: doc.id, ...doc.data() }));
         setSosAlerts(alerts);
       });
+      getDocs(collection(db, "users")).then(snap => { const u=[]; snap.forEach(d => u.push(d.id)); setAllUsers(u); });
       getDocs(collection(db, "admins")).then(snap => { const a=[]; snap.forEach(d => a.push(d.id)); setAdminList(a); });
       return () => { unsubLoc(); unsubSOS(); };
     }
@@ -188,11 +190,9 @@ export default function App() {
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           {currentUser === 'tszkit9' && (
-            <a href="/admin" style={{ textDecoration: 'none' }}>
-              <View style={styles.navBtn}>
-                <Text style={styles.navBtnText}>⚙️ 管理員後台</Text>
-              </View>
-            </a>
+            <TouchableOpacity onPress={() => setView(view === 'guard' ? 'admin' : 'guard')} style={styles.navBtn}>
+              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
+            </TouchableOpacity>
           )}
           <TouchableOpacity onPress={() => { setCurrentUser(null); setView('guard'); }} style={[styles.navBtn, { backgroundColor: '#F44336' }]}>
             <Text style={styles.navBtnText}>登出</Text>
@@ -314,6 +314,12 @@ export default function App() {
             <TouchableOpacity style={styles.button} onPress={addAdmin}><Text style={styles.buttonText}>確認新增</Text></TouchableOpacity>
             <Text style={{ marginTop: 10, color: '#666' }}>名單：{adminList.join(', ')}</Text>
           </View>
+
+          <View style={styles.card}>
+            <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
+            <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
+          </View>
+
         </ScrollView>
       )}
     </SafeAreaView>
