@@ -188,7 +188,7 @@ export default function App() {
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           {currentUser === 'tszkit9' && (
-            <TouchableOpacity onPress={() => setView(view === 'guard' ? 'admin' : 'guard')} style={styles.navBtn}>
+            <TouchableOpacity onPress={() => { window.alert("撳到了！"); setView(view === 'guard' ? 'admin' : 'guard'); }} style={styles.navBtn}>
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
             </TouchableOpacity>
           )}
