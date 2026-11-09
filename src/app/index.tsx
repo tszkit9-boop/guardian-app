@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
-import { Pressable } from 'react-native'; // 🌟 加呢句
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView, Linking } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView, ScrollView, Linking, Pressable } from 'react-native';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc } from 'firebase/firestore';
 import * as Location from 'expo-location';
@@ -20,10 +19,11 @@ const db = getFirestore(app);
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   
-  // 🌟 自動偵測網址
+  // 🌟 支援網址直接進入後台 (?admin=true)
   const [view, setView] = useState(() => {
-    if (typeof window !== 'undefined' && window.location.pathname.includes('/admin')) {
-      return 'admin';
+    if (typeof window !== 'undefined') {
+      const url = window.location.href;
+      if (url.includes('/admin') || url.includes('admin=true')) return 'admin';
     }
     return 'guard';
   });
@@ -196,29 +196,31 @@ export default function App() {
     <SafeAreaView style={styles.mainContainer}>
       <View style={styles.header}>
         <Text style={styles.headerText}>👤 {currentUser}</Text>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           
-          {/* 🌟 已修復：移除重複嘅 Tag */}
+          {/* 🌟 使用 Pressable 確保 Web 點擊 100% 成功 */}
           {currentUser === 'tszkit9' && (
             <Pressable 
               onPress={() => {
-                console.log("撳到後台掣！"); // 喺 F12 Console 會見到
-                setView('admin');
+                const newView = view === 'guard' ? 'admin' : 'guard';
+                setView(newView);
+                if (typeof window !== 'undefined') {
+                  window.history.pushState({}, '', newView === 'admin' ? '/?admin=true' : '/');
+                }
               }} 
-              style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
-            >
-              <Text style={styles.navBtnText}>⚙️ 管理員後台</Text>
-            </Pressable>
-          )}
-              style={styles.navBtn}
+              style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.7 : 1 }]}
             >
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
-            </TouchableOpacity>
+            </Pressable>
           )}
 
-          <TouchableOpacity onPress={() => { setCurrentUser(null); setView('guard'); }} style={[styles.navBtn, { backgroundColor: '#F44336' }]}>
+          <Pressable 
+            onPress={() => { setCurrentUser(null); setView('guard'); }} 
+            style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', opacity: pressed ? 0.7 : 1 }]}
+          >
             <Text style={styles.navBtnText}>登出</Text>
-          </TouchableOpacity>
+          </Pressable>
+          
         </View>
       </View>
 
@@ -353,7 +355,7 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F5F5F5' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#DDD' },
   headerText: { fontSize: 16, fontWeight: 'bold' },
-  navBtn: { backgroundColor: '#2196F3', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  navBtn: { backgroundColor: '#2196F3', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, cursor: 'pointer' },
   navBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
   content: { padding: 20 },
   title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
