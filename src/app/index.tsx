@@ -200,14 +200,16 @@ export default function App() {
           
           {/* 🌟 已修復：移除重複嘅 Tag */}
           {currentUser === 'tszkit9' && (
-            <TouchableOpacity 
+            <Pressable 
               onPress={() => {
-                const newView = view === 'guard' ? 'admin' : 'guard';
-                setView(newView);
-                if (typeof window !== 'undefined') {
-                  window.history.pushState({}, '', newView === 'admin' ? '/admin' : '/');
-                }
+                console.log("撳到後台掣！"); // 喺 F12 Console 會見到
+                setView('admin');
               }} 
+              style={({ pressed }) => [styles.navBtn, { opacity: pressed ? 0.5 : 1 }]}
+            >
+              <Text style={styles.navBtnText}>⚙️ 管理員後台</Text>
+            </Pressable>
+          )}
               style={styles.navBtn}
             >
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
