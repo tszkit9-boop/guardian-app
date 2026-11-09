@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, TextInput, SafeAreaView, Alert, Platform } from 'react-native';
-import * as Location from 'expo-location';
+import { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, SafeAreaView } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import { useRouter } from 'expo-router'; // 用嚟跳去後台
 
-// ⚠️ 呢度貼你個 Firebase Config
+// ⚠️ 貼你嘅 Config
 const firebaseConfig = {
   apiKey: "AIzaSyAZNQcRCFis8e3aYy7b3nxd8pafzNgYw",
   authDomain: "guardian-app-f23c6.firebaseapp.com",
@@ -12,107 +12,73 @@ const firebaseConfig = {
   storageBucket: "guardian-app-f23c6.firebasestorage.app",
   messagingSenderId: "1075988300124",
   appId: "1:1075988300124:web:59be47526be9800e6e60199",
-  measurementId: "G-G09P2K8SXH"
 };
-
-// 初始化 Firebase
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const auth = getAuth(app);
 
-export default function HomeScreen() {
-  const [destination, setDestination] = useState('');
-  const [isGuarding, setIsGuarding] = useState(false);
-  const [locationText, setLocationText] = useState('僅在你同意後分享定位');
+export default function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [user, setUser] = useState<any>(null);
+  const router = useRouter();
 
-  const startGuardian = async () => {
-    if (!destination) {
-      Alert.alert('提示', '請輸入目的地！');
-      return;
-    }
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
 
-    setLocationText('獲取定位並上傳中...');
-
-    try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('錯誤', '需要定位權限才能守護你！');
-        setLocationText('定位失敗：沒有權限');
-        return;
-      }
-
-      let location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      const { latitude, longitude } = location.coords;
-      
-      // 🔥 呢句就係將數據射上 Firebase 嘅關鍵！🔥
-      await setDoc(doc(db, "locations", "user1"), {
-        lat: latitude,
-        lng: longitude,
-        destination: destination,
-        updatedAt: new Date().toISOString()
-      });
-
-      setLocationText(`已定位並上傳：${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-      setIsGuarding(true);
-      
-      Alert.alert('守護開始', `正在守護你前往：${destination}\n數據已上傳到後台！`);
-      
-    } catch (error) {
-      console.error(error);
-      setLocationText('定位或上傳出錯');
-      Alert.alert('錯誤', '無法獲取定位或上傳，請檢查網絡。');
-    }
+  const handleSignUp = () => {
+    createUserWithEmailAndPassword(auth, email, password)
+      .then(() => Alert.alert('成功', '帳戶已建立！'))
+      .catch((error) => Alert.alert('錯誤', error.message));
   };
 
+  const handleLogin = () => {
+    signInWithEmailAndPassword(auth, email, password)
+      .then(() => Alert.alert('成功', '登入成功！'))
+      .catch((error) => Alert.alert('錯誤', '登入失敗，請檢查帳號密碼。'));
+  };
+
+  const handleLogout = () => signOut(auth);
+
+  // 如果已登入，顯示歡迎畫面
+  if (user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={styles.title}>👋 歡迎，{user.email}</Text>
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/admin')}>
+          <Text style={styles.buttonText}>進入管理員後台</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.button, { backgroundColor: '#F44336' }]} onPress={handleLogout}>
+          <Text style={styles.buttonText}>登出</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  // 未登入，顯示登入畫面
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>守護同行 Guardian</Text>
-      <Text style={styles.subtitle}>晚上 10:30 · 準備回家了嗎？</Text>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>📍 現在位置</Text>
-        <Text style={styles.locationText}>{locationText}</Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>🏠 目的地</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="輸入安全抵達地點"
-          value={destination}
-          onChangeText={setDestination}
-        />
-      </View>
-
-      {!isGuarding ? (
-        <TouchableOpacity style={styles.button} onPress={startGuardian}>
-          <Text style={styles.buttonText}>開始安全陪伴</Text>
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.guardingBox}>
-          <Text style={styles.guardingText}>🛡️ 守護中...</Text>
-          <TouchableOpacity style={[styles.button, styles.stopButton]} onPress={() => setIsGuarding(false)}>
-            <Text style={styles.buttonText}>我已安全抵達</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <Text style={styles.title}>🛡️ 守護同行 登入</Text>
+      <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" />
+      <TextInput style={styles.input} placeholder="密碼" value={password} onChangeText={setPassword} secureTextEntry />
+      
+      <TouchableOpacity style={styles.button} onPress={handleLogin}>
+        <Text style={styles.buttonText}>登入</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.button, { backgroundColor: '#2196F3' }]} onPress={handleSignUp}>
+        <Text style={styles.buttonText}>註冊新帳號</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F5F5', padding: 20, justifyContent: 'center' },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#333' },
-  subtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
-  card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
-  label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 5 },
-  locationText: { fontSize: 14, color: '#999' },
-  input: { fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#EEE', paddingVertical: 5 },
+  container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: '#F5F5F5' },
+  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
+  input: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#DDD' },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-  buttonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  guardingBox: { backgroundColor: '#E8F5E9', padding: 20, borderRadius: 10, marginTop: 20 },
-  guardingText: { fontSize: 18, fontWeight: 'bold', color: '#2E7D32', textAlign: 'center', marginBottom: 10 },
-  stopButton: { backgroundColor: '#FF9800' }
+  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });
