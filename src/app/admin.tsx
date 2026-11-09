@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, Alert, ScrollView } from 'react-native';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAZNQcRCFis8e3aYy7b3nxd8pafzNgYw",
@@ -17,24 +17,21 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 export default function AdminScreen() {
-  // 接收由首頁傳過嚟嘅名
-  const { username } = useLocalSearchParams();
-  const currentUser = username ? String(username) : '';
-
   const [isAdmin, setIsAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
   const [newAdminName, setNewAdminName] = useState('');
-  const [adminList, setAdminList] = useState<string[]>([]);
+  const [adminList, setAdminList] = useState([]);
   const router = useRouter();
 
   useEffect(() => {
     const checkAdmin = async () => {
-      // 如果個名係 tszkit9，直接做 Admin
+      // 直接由瀏覽器攞個名出嚟
+      const currentUser = localStorage.getItem('currentUser');
+      
       if (currentUser === 'tszkit9') {
         setIsAdmin(true);
         fetchAdmins();
       } else if (currentUser) {
-        // 檢查個名有冇喺 admins 名單入面
         const docRef = doc(db, "admins", currentUser);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
@@ -43,15 +40,17 @@ export default function AdminScreen() {
         } else {
           setIsAdmin(false);
         }
+      } else {
+        setIsAdmin(false);
       }
       setChecking(false);
     };
     checkAdmin();
-  }, [currentUser]);
+  }, []);
 
   const fetchAdmins = async () => {
     const querySnapshot = await getDocs(collection(db, "admins"));
-    const names: string[] = [];
+    const names = [];
     querySnapshot.forEach((doc) => names.push(doc.id));
     setAdminList(names);
   };
@@ -102,7 +101,7 @@ export default function AdminScreen() {
         </ScrollView>
       </View>
 
-      <TouchableOpacity style={[styles.button, { backgroundColor: '#F44336' }]} onPress={() => router.push('/')}>
+      <TouchableOpacity style={[styles.button, { backgroundColor: '#F44336' }]} onPress={() => { localStorage.removeItem('currentUser'); router.push('/'); }}>
         <Text style={styles.buttonText}>登出</Text>
       </TouchableOpacity>
     </SafeAreaView>
