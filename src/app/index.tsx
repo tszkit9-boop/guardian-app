@@ -17,25 +17,23 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 export default function App() {
-  // --- 狀態管理 ---
   const [currentUser, setCurrentUser] = useState(null);
-  const [view, setView] = useState('guard'); // 'guard' 或 'admin'
+  const [view, setView] = useState('guard');
   
-  // 登入/註冊用
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // 守護功能用
   const [destination, setDestination] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [isGuarding, setIsGuarding] = useState(false);
+  
+  // 🌟 修改咗預設文字
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
 
-  // 管理員功能用
   const [newAdminName, setNewAdminName] = useState('');
   const [adminList, setAdminList] = useState([]);
 
-  // --- 登入/註冊邏輯 ---
   const handleAuth = async () => {
     if (!username || !password) return Alert.alert('提示', '請輸入名稱同密碼！');
     try {
@@ -45,7 +43,7 @@ export default function App() {
       if (isLoginMode) {
         if (userSnap.exists() && userSnap.data().password === password) {
           setCurrentUser(username);
-          setView('guard'); // 登入後預設去守護主頁
+          setView('guard');
           if (username === 'tszkit9') fetchAdmins();
         } else {
           Alert.alert('錯誤', '名稱或密碼錯誤！');
@@ -64,10 +62,11 @@ export default function App() {
     }
   };
 
-  // --- 守護功能邏輯 ---
   const startGuardian = async () => {
     if (!destination) return Alert.alert('提示', '請輸入目的地！');
-    setLocationText('獲取定位中...');
+    if (!contactPhone) return Alert.alert('提示', '請輸入緊急聯絡人電話！');
+
+    setLocationText('正在獲取位置及地址...');
 
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -79,17 +78,33 @@ export default function App() {
       let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = loc.coords;
 
+      // 🌟 新增：將經緯度翻譯做真實地址
+      let addressString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`; // 預設備用
+      try {
+        let geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (geocode.length > 0) {
+          const addr = geocode[0];
+          // 砌出香港格式地址（例如：香港 九龍城區 亞皆老街）
+          addressString = `${addr.region || ''} ${addr.city || ''} ${addr.district || ''} ${addr.street || ''} ${addr.name || ''}`.trim();
+        }
+      } catch (geoError) {
+        console.log("地址翻譯失敗，使用經緯度", geoError);
+      }
+
       // 上傳去 Firebase
       await setDoc(doc(db, "locations", "user1"), {
         lat: latitude,
         lng: longitude,
+        address: addressString, // 🌟 存入地址
         destination: destination,
+        contactPhone: contactPhone,
         updatedAt: new Date().toISOString()
       });
 
-      setLocationText(`已定位並上傳：${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      // 🌟 畫面顯示地址
+      setLocationText(`已定位：${addressString}`);
       setIsGuarding(true);
-      Alert.alert('守護開始', `正在守護你前往：${destination}`);
+      Alert.alert('守護開始', `正在守護你前往：${destination}\n位置：${addressString}`);
     } catch (error) {
       console.error(error);
       setLocationText('定位出錯');
@@ -97,7 +112,6 @@ export default function App() {
     }
   };
 
-  // --- 管理員邏輯 ---
   const fetchAdmins = async () => {
     const querySnapshot = await getDocs(collection(db, "admins"));
     const names = [];
@@ -113,9 +127,6 @@ export default function App() {
     fetchAdmins();
   };
 
-  // ================= 介面渲染 =================
-
-  // 1. 如果未登入，顯示登入畫面
   if (!currentUser) {
     return (
       <SafeAreaView style={styles.container}>
@@ -135,10 +146,8 @@ export default function App() {
     );
   }
 
-  // 2. 如果已登入，顯示主介面 (包含頂部導航)
   return (
     <SafeAreaView style={styles.mainContainer}>
-      {/* 頂部導航列 */}
       <View style={styles.header}>
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -153,7 +162,6 @@ export default function App() {
         </View>
       </View>
 
-      {/* 守護主頁 View */}
       {view === 'guard' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>守護同行 Guardian</Text>
@@ -161,12 +169,24 @@ export default function App() {
 
           <View style={styles.card}>
             <Text style={styles.label}>📍 現在位置</Text>
+            {/* 呢度會顯示真實地址 */}
             <Text style={styles.locationText}>{locationText}</Text>
           </View>
 
           <View style={styles.card}>
             <Text style={styles.label}>🏠 目的地</Text>
             <TextInput style={styles.input} placeholder="輸入安全抵達地點" value={destination} onChangeText={setDestination} />
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.label}>📞 緊急聯絡人電話</Text>
+            <TextInput 
+              style={styles.input} 
+              placeholder="例如: 91234567" 
+              value={contactPhone} 
+              onChangeText={setContactPhone} 
+              keyboardType="phone-pad" 
+            />
           </View>
 
           {!isGuarding ? (
@@ -184,7 +204,6 @@ export default function App() {
         </ScrollView>
       )}
 
-      {/* 管理員後台 View */}
       {view === 'admin' && (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
@@ -222,8 +241,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
   card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
   label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 5 },
-  locationText: { fontSize: 14, color: '#999' },
-  input: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
+  locationText: { fontSize: 16, color: '#333', fontWeight: '500', marginTop: 5 },
+  input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
   buttonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   guardingBox: { backgroundColor: '#E8F5E9', padding: 20, borderRadius: 10, marginTop: 20 },
