@@ -19,7 +19,7 @@ const db = getFirestore(app);
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoginMode, setIsLoginMode] = useState(true); // 預設係登入模式
+  const [isLoginMode, setIsLoginMode] = useState(true);
   const router = useRouter();
 
   const handleAuth = async () => {
@@ -33,16 +33,15 @@ export default function LoginScreen() {
       const userSnap = await getDoc(userRef);
 
       if (isLoginMode) {
-        // 登入邏輯
         if (userSnap.exists() && userSnap.data().password === password) {
+          // 登入成功，儲存個名落瀏覽器
+          localStorage.setItem('currentUser', username);
           Alert.alert('成功', `歡迎返嚟，${username}！`);
-          // 跳去 Admin 頁面，並將個名傳過去
-          router.push({ pathname: '/admin', params: { username: username } });
+          router.push('/admin');
         } else {
           Alert.alert('錯誤', '名稱或密碼錯誤！');
         }
       } else {
-        // 註冊邏輯
         if (userSnap.exists()) {
           Alert.alert('錯誤', '呢個名稱已經有人用咗啦！');
         } else {
@@ -53,7 +52,6 @@ export default function LoginScreen() {
       }
     } catch (error) {
       Alert.alert('系統錯誤', '請檢查網絡。');
-      console.error(error);
     }
   };
 
@@ -62,20 +60,8 @@ export default function LoginScreen() {
       <Text style={styles.title}>🛡️ 守護同行</Text>
       <Text style={styles.subtitle}>{isLoginMode ? '登入帳戶' : '註冊新帳戶'}</Text>
 
-      <TextInput 
-        style={styles.input} 
-        placeholder="輸入名稱 (例如: tszkit9)" 
-        value={username} 
-        onChangeText={setUsername} 
-        autoCapitalize="none" 
-      />
-      <TextInput 
-        style={styles.input} 
-        placeholder="輸入密碼" 
-        value={password} 
-        onChangeText={setPassword} 
-        secureTextEntry 
-      />
+      <TextInput style={styles.input} placeholder="輸入名稱 (例如: tszkit9)" value={username} onChangeText={setUsername} autoCapitalize="none" />
+      <TextInput style={styles.input} placeholder="輸入密碼" value={password} onChangeText={setPassword} secureTextEntry />
       
       <TouchableOpacity style={styles.button} onPress={handleAuth}>
         <Text style={styles.buttonText}>{isLoginMode ? '登入' : '確認註冊'}</Text>
