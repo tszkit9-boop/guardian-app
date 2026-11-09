@@ -18,7 +18,12 @@ const db = getFirestore(app);
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [view, setView] = useState('guard'); // 'guard' 或 'admin'
+const [view, setView] = useState(() => {
+  if (typeof window !== 'undefined' && window.location.pathname.includes('/admin')) {
+    return 'admin';
+  }
+  return 'guard';
+});
   
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
@@ -190,7 +195,20 @@ export default function App() {
         <Text style={styles.headerText}>👤 {currentUser}</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           {currentUser === 'tszkit9' && (
-            <TouchableOpacity onPress={() => setView(view === 'guard' ? 'admin' : 'guard')} style={styles.navBtn}>
+          {currentUser === 'tszkit9' && (
+            <TouchableOpacity 
+              onPress={() => {
+                const newView = view === 'guard' ? 'admin' : 'guard';
+                setView(newView);
+                if (typeof window !== 'undefined') {
+                  window.history.pushState({}, '', newView === 'admin' ? '/admin' : '/');
+                }
+              }} 
+              style={styles.navBtn}
+            >
+              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
+            </TouchableOpacity>
+          )}
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回首頁'}</Text>
             </TouchableOpacity>
           )}
