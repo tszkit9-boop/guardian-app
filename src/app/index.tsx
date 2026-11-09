@@ -34,9 +34,8 @@ export default function App() {
 
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
-  const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
+  const [adminList, setAdminList] = useState([]);
 
   const handleAuth = async () => {
     if (!username || !password) return Alert.alert('提示', '請輸入名稱同密碼！');
@@ -104,7 +103,7 @@ export default function App() {
   }, [isGuarding, timeLeft]);
 
   const autoTriggerSOS = async () => {
-    Alert.alert('⚠️ 逾時警告', '你已超過預計時間未報平安，系統已自動發出求救！');
+    Alert.alert('⚠️ 逾時警告', '系統已自動發出求救！');
     await addDoc(collection(db, "sos_alerts"), {
       username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: true
     });
@@ -147,7 +146,6 @@ export default function App() {
         snapshot.forEach(doc => alerts.push({ id: doc.id, ...doc.data() }));
         setSosAlerts(alerts);
       });
-      getDocs(collection(db, "users")).then(snap => { const u=[]; snap.forEach(d => u.push(d.id)); setAllUsers(u); });
       getDocs(collection(db, "admins")).then(snap => { const a=[]; snap.forEach(d => a.push(d.id)); setAdminList(a); });
       return () => { unsubLoc(); unsubSOS(); };
     }
@@ -312,13 +310,8 @@ export default function App() {
             <Text style={styles.label}>👑 新增管理員</Text>
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
             <TouchableOpacity style={styles.button} onPress={addAdmin}><Text style={styles.buttonText}>確認新增</Text></TouchableOpacity>
+            <Text style={{ marginTop: 10, color: '#666' }}>名單：{adminList.join(', ')}</Text>
           </View>
-
-          <View style={styles.card}>
-            <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
-            <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
-          </View>
-
         </ScrollView>
       )}
     </SafeAreaView>
