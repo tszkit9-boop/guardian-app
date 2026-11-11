@@ -19,6 +19,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
+// 網頁版專用彈窗
 const showAlert = (title, msg) => {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
   else Alert.alert(title, msg);
@@ -49,6 +50,7 @@ export default function App() {
 
   const [isGuarding, setIsGuarding] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('guard_isGuarding') === 'true' : false);
   const [timeLeft, setTimeLeft] = useState(() => typeof window !== 'undefined' ? parseInt(localStorage.getItem('guard_timeLeft') || '0', 10) : 0);
+  const [locationText, setLocationText] = useState('僅在你同意後分享定位');
   const timerRef = useRef(null);
 
   // 假電話 & 警報
@@ -66,14 +68,14 @@ export default function App() {
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
   const [videoList, setVideoList] = useState([]);
-  const [historyList, setHistoryList] = useState([]); // 🌟 歷史紀錄
+  const [historyList, setHistoryList] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
   const [targetUsername, setTargetUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
 
-  // 自動儲存狀態
+  // 自動儲存守護狀態
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('guard_isGuarding', isGuarding.toString());
@@ -81,6 +83,7 @@ export default function App() {
     }
   }, [isGuarding, timeLeft]);
 
+  // 登入/註冊
   const handleAuth = async () => {
     if (!username || !password) return showAlert('提示', '請輸入名稱同密碼！');
     try {
@@ -103,6 +106,7 @@ export default function App() {
     } catch (e) { showAlert('錯誤', '網絡問題。'); }
   };
 
+  // 開始守護
   const startGuardian = async () => {
     if (!destination || !contactPhone) return showAlert('提示', '請填寫目的地同聯絡人！');
     const minutes = parseInt(duration);
@@ -139,6 +143,7 @@ export default function App() {
     } catch (error) { setLocationText('定位出錯'); }
   };
 
+  // 倒數計時
   useEffect(() => {
     if (isGuarding && timeLeft > 0) {
       timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
@@ -156,11 +161,11 @@ export default function App() {
     });
   };
 
+  // 安全抵達
   const stopGuardian = async () => {
     clearInterval(timerRef.current);
     await setDoc(doc(db, "locations", currentUser), { status: 'arrived' }, { merge: true });
     
-    // 🌟 寫入歷史紀錄
     await addDoc(collection(db, "history"), {
       username: currentUser, destination: destination, contactPhone: contactPhone, status: '安全抵達', timestamp: new Date().toISOString()
     });
@@ -172,13 +177,13 @@ export default function App() {
     showAlert('安全抵達', '已通知後台你安全抵達。');
   };
 
+  // SOS 求救
   const triggerSOS = () => {
     showConfirm('確認求救', '確定要發出緊急求救嗎？', async () => {
       clearInterval(timerRef.current);
       await addDoc(collection(db, "sos_alerts"), {
         username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false
       });
-      // 🌟 SOS 亦寫入歷史
       await addDoc(collection(db, "history"), {
         username: currentUser, destination: destination, contactPhone: contactPhone, status: '發出SOS', timestamp: new Date().toISOString()
       });
@@ -186,7 +191,7 @@ export default function App() {
     });
   };
 
-  // 🌟 假電話邏輯
+  // 假電話
   const triggerFakeCall = () => {
     setFakeCallActive(true);
     if (typeof window !== 'undefined') {
@@ -200,7 +205,7 @@ export default function App() {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   };
 
-  // 🌟 防狼警報邏輯
+  // 防狼警報
   const toggleSiren = () => {
     if (sirenActive) {
       setSirenActive(false);
@@ -215,6 +220,7 @@ export default function App() {
     }
   };
 
+  // 錄影
   const handleRecordVideo = async () => {
     if (!cameraRef.current) return;
     if (isRecording) {
@@ -248,8 +254,14 @@ export default function App() {
   };
 
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
-  const startVideoCall = (roomName) => Linking.openURL(`https://meet.jit.si/guardian-${roomName}`);
+  
+  // 🌟 管理員潛水視訊（預設靜音+關鏡頭）
+  const startVideoCall = (roomName) => {
+    const jitsiUrl = `https://meet.jit.si/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
+    Linking.openURL(jitsiUrl);
+  };
 
+  // 管理員實時監聽
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
       const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
@@ -267,7 +279,6 @@ export default function App() {
         snapshot.forEach(doc => vids.push({ id: doc.id, ...doc.data() }));
         setVideoList(vids.reverse()); 
       });
-      // 🌟 監聽歷史紀錄
       const unsubHistory = onSnapshot(collection(db, "history"), (snapshot) => {
         const hists = [];
         snapshot.forEach(doc => hists.push({ id: doc.id, ...doc.data() }));
@@ -334,7 +345,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.mainContainer}>
-      {/* 🌟 假電話全螢幕彈出 */}
+      {/* 假電話全螢幕彈出 */}
       <Modal visible={fakeCallActive} animationType="slide" transparent={false}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }}>
           <Text style={{ color: '#FFF', fontSize: 24, marginBottom: 10 }}>📞 媽媽 來電...</Text>
@@ -408,7 +419,6 @@ export default function App() {
                 </Pressable>
               )}
 
-              {/* 🌟 假電話 & 警報掣 */}
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
                 <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#FF9800', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={triggerFakeCall}>
                   <Text style={styles.buttonText}>📞 假電話</Text>
@@ -495,7 +505,6 @@ export default function App() {
             }
           </View>
 
-          {/* 🌟 新增：歷史紀錄 */}
           <View style={styles.card}>
             <Text style={styles.label}>📜 守護歷史紀錄 ({historyList.length})</Text>
             <ScrollView style={{ maxHeight: 300 }}>
