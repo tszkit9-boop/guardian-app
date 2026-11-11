@@ -316,19 +316,20 @@ export default function App() {
     showAlert('成功', `${newAdminName} 已成為管理員！`);
   };
 
-  // 清空歷史紀錄
+  // 清空歷史紀錄 (修復命名衝突 Bug)
   const clearHistory = () => {
     showConfirm('確認清空', '確定要刪除所有歷史紀錄嗎？此操作無法復原！', async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "history"));
         const deletePromises = [];
-        querySnapshot.forEach((doc) => {
-          deletePromises.push(deleteDoc(doc(db, "history", doc.id)));
+        querySnapshot.forEach((document) => {
+          deletePromises.push(deleteDoc(doc(db, "history", document.id)));
         });
         await Promise.all(deletePromises);
         showAlert('成功', '所有歷史紀錄已清空！');
       } catch (e) {
-        showAlert('錯誤', '清空失敗，請檢查網絡。');
+        console.error("清空失敗:", e);
+        showAlert('錯誤', '清空失敗，請檢查網絡或 Firebase 權限。');
       }
     });
   };
