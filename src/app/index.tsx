@@ -255,9 +255,9 @@ export default function App() {
 
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   
-  // 🌟 管理員潛水視訊（預設靜音+關鏡頭）
+  // 🌟 管理員潛水視訊（改用社群伺服器 meet.ffmuc.net，免除登入限制）
   const startVideoCall = (roomName) => {
-    const jitsiUrl = `https://meet.jit.si/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
+    const jitsiUrl = `https://meet.ffmuc.net/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
     Linking.openURL(jitsiUrl);
   };
 
