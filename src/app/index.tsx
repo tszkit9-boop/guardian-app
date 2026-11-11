@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, ScrollView, Linking, Pressable, Platform } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore'; // 🌟 加咗 updateDoc
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -58,10 +58,14 @@ export default function App() {
   // 管理員數據
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
-  const [videoList, setVideoList] = useState([]); // 🌟 新增影片列表
+  const [videoList, setVideoList] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
+
+  // 🌟 修改密碼專用狀態
+  const [targetUsername, setTargetUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
 
   const handleAuth = async () => {
     if (!username || !password) return showAlert('提示', '請輸入名稱同密碼！');
@@ -192,7 +196,6 @@ export default function App() {
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   const startVideoCall = (roomName) => Linking.openURL(`https://meet.jit.si/guardian-${roomName}`);
 
-  // 🌟 管理員實時監聽 (加入影片同刪除 SOS 功能)
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
       const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
@@ -208,7 +211,7 @@ export default function App() {
       const unsubVideos = onSnapshot(collection(db, "videos"), (snapshot) => {
         const vids = [];
         snapshot.forEach(doc => vids.push({ id: doc.id, ...doc.data() }));
-        setVideoList(vids.reverse()); // 最新嘅排最前
+        setVideoList(vids.reverse()); 
       });
       getDocs(collection(db, "users")).then(snap => { const u=[]; snap.forEach(d => u.push(d.id)); setAllUsers(u); });
       getDocs(collection(db, "admins")).then(snap => { const a=[]; snap.forEach(d => a.push(d.id)); setAdminList(a); });
@@ -224,11 +227,30 @@ export default function App() {
     showAlert('成功', `${newAdminName} 已成為管理員！`);
   };
 
-  // 🌟 刪除/處理 SOS 警報
   const resolveSOS = async (id) => {
     showConfirm('確認處理', '確定要標記為已處理並清除警報嗎？', async () => {
       await deleteDoc(doc(db, "sos_alerts", id));
     });
+  };
+
+  // 🌟 修改密碼邏輯
+  const changeUserPassword = async () => {
+    if (!targetUsername || !newPassword) return showAlert('提示', '請輸入要修改嘅用戶名稱同新密碼！');
+    try {
+      const userRef = doc(db, "users", targetUsername);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        await updateDoc(userRef, { password: newPassword }); // 更新 Firebase 入面嘅密碼
+        showAlert('成功', `用戶 ${targetUsername} 嘅密碼已成功修改為：${newPassword}`);
+        setTargetUsername('');
+        setNewPassword('');
+      } else {
+        showAlert('錯誤', `搵唔到用戶 ${targetUsername}，請確認名稱是否正確。`);
+      }
+    } catch (e) {
+      showAlert('錯誤', '修改失敗，請檢查網絡。');
+    }
   };
 
   const formatTime = (seconds) => {
@@ -355,7 +377,7 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
 
-          {/* 1. 緊急求救區 (加入已處理掣) */}
+          {/* 緊急求救區 */}
           {sosAlerts.length > 0 && (
             <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 2 }]}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
@@ -373,16 +395,15 @@ export default function App() {
                     </Pressable>
                   </View>
                   
-                  {/* 🌟 新增：處理並刪除警報 */}
                   <Pressable style={({pressed}) => [styles.button, { marginTop: 10, padding: 10, backgroundColor: '#4CAF50', opacity: pressed ? 0.7 : 1 }]} onPress={() => resolveSOS(alert.id)}>
-                    <Text style={styles.buttonText}>✅ 標記為已處理 (清除警報)</Text>
+                    <Text style={styles.buttonText}>✅ 標記為已處理</Text>
                   </Pressable>
                 </View>
               ))}
             </View>
           )}
 
-          {/* 2. 實時監控區 */}
+          {/* 實時監控區 */}
           <View style={styles.card}>
             <Text style={styles.label}>📍 實時守護監控 ({activeGuardians.length})</Text>
             {activeGuardians.length === 0 ? <Text style={{color:'#999'}}>目前無人需要守護。</Text> : 
@@ -409,7 +430,17 @@ export default function App() {
             }
           </View>
 
-          {/* 🌟 3. 新增：證據影片區 */}
+          {/* 🌟 新增：修改用戶密碼區塊 */}
+          <View style={styles.card}>
+            <Text style={styles.label}>🔐 修改用戶密碼</Text>
+            <TextInput style={styles.input} value={targetUsername} onChangeText={setTargetUsername} placeholder="輸入用戶名稱 (例如: user1)" />
+            <TextInput style={styles.input} value={newPassword} onChangeText={setNewPassword} placeholder="輸入新密碼" />
+            <Pressable style={({pressed}) => [styles.button, {backgroundColor: '#3F51B5', opacity: pressed ? 0.7 : 1}]} onPress={changeUserPassword}>
+              <Text style={styles.buttonText}>確認修改密碼</Text>
+            </Pressable>
+          </View>
+
+          {/* 證據影片區 */}
           <View style={styles.card}>
             <Text style={styles.label}>🎥 用戶錄影證據 ({videoList.length})</Text>
             {videoList.length === 0 ? <Text style={{color:'#999'}}>暫無影片。</Text> : 
@@ -418,7 +449,6 @@ export default function App() {
                   <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 用戶：{v.username}</Text>
                   <Text style={{ color: '#666', fontSize: 12, marginBottom: 10 }}>時間：{new Date(v.timestamp).toLocaleString()}</Text>
                   
-                  {/* Web 版專用影片播放器 */}
                   {Platform.OS === 'web' ? (
                     <video src={v.videoUrl} controls style={{ width: '100%', borderRadius: 8, maxHeight: 200, backgroundColor: '#000' }} />
                   ) : (
@@ -431,7 +461,7 @@ export default function App() {
             }
           </View>
 
-          {/* 4. 管理員名單 */}
+          {/* 管理員名單 */}
           <View style={styles.card}>
             <Text style={styles.label}>👑 新增管理員</Text>
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
@@ -466,7 +496,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
   label: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   locationText: { fontSize: 16, color: '#333', fontWeight: '500', marginTop: 5 },
-  input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
+  input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, marginBottom: 10, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
   buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   guardingBox: { backgroundColor: '#E8F5E9', padding: 20, borderRadius: 10, marginTop: 20 },
