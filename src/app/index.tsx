@@ -52,6 +52,7 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(() => typeof window !== 'undefined' ? parseInt(localStorage.getItem('guard_timeLeft') || '0', 10) : 0);
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
   const timerRef = useRef(null);
+  const watchLocationRef = useRef(null); // 🌟 用嚟儲存實時定位追蹤器
 
   // 假電話 & 警報
   const [fakeCallActive, setFakeCallActive] = useState(false);
@@ -106,7 +107,7 @@ export default function App() {
     } catch (e) { showAlert('錯誤', '網絡問題。'); }
   };
 
-  // 開始守護
+  // 開始守護 (加入實時追蹤)
   const startGuardian = async () => {
     if (!destination || !contactPhone) return showAlert('提示', '請填寫目的地同聯絡人！');
     const minutes = parseInt(duration);
@@ -118,7 +119,8 @@ export default function App() {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return showAlert('錯誤', '需要定位權限！');
 
-      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      // 獲取第一次準確位置
+      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
       const { latitude, longitude } = loc.coords;
 
       let addressString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
@@ -140,6 +142,19 @@ export default function App() {
       setTimeLeft(minutes * 60); 
       
       if (!cameraPermission?.granted) await requestCameraPermission();
+
+      // 🌟 開啟實時追蹤：每移動 10 米更新一次 Firebase
+      watchLocationRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 10 },
+        async (newLoc) => {
+          const { latitude: newLat, longitude: newLng } = newLoc.coords;
+          // 只更新座標同時間
+          await setDoc(doc(db, "locations", currentUser), {
+            lat: newLat, lng: newLng, updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      );
+
     } catch (error) { setLocationText('定位出錯'); }
   };
 
@@ -164,6 +179,12 @@ export default function App() {
   // 安全抵達
   const stopGuardian = async () => {
     clearInterval(timerRef.current);
+    // 🌟 停止實時追蹤
+    if (watchLocationRef.current) {
+      watchLocationRef.current.remove();
+      watchLocationRef.current = null;
+    }
+
     await setDoc(doc(db, "locations", currentUser), { status: 'arrived' }, { merge: true });
     
     await addDoc(collection(db, "history"), {
@@ -255,7 +276,7 @@ export default function App() {
 
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   
-  // 🌟 管理員潛水視訊（改用社群伺服器 meet.ffmuc.net，免除登入限制）
+  // 🌟 管理員潛水視訊 (改用社群伺服器免除登入)
   const startVideoCall = (roomName) => {
     const jitsiUrl = `https://meet.ffmuc.net/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
     Linking.openURL(jitsiUrl);
@@ -489,9 +510,22 @@ export default function App() {
                   <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 {g.username}</Text>
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
-                  <Pressable onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
-                    <Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text>
-                  </Pressable>
+                  
+                  {/* 🌟 後台直接嵌入地圖 */}
+                  <View style={{ height: 200, marginTop: 10, borderRadius: 10, overflow: 'hidden' }}>
+                    {Platform.OS === 'web' ? (
+                      <iframe
+                        src={`https://maps.google.com/maps?q=${g.lat},${g.lng}&z=16&output=embed`}
+                        style={{ width: '100%', height: '100%', border: 0 }}
+                        allowFullScreen
+                      />
+                    ) : (
+                      <Pressable onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
+                        <Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text>
+                      </Pressable>
+                    )}
+                  </View>
+
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
                     <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(g.contactPhone)}>
                       <Text style={styles.buttonText}>📞 致電</Text>
