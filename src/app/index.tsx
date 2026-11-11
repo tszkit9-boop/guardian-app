@@ -52,7 +52,7 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(() => typeof window !== 'undefined' ? parseInt(localStorage.getItem('guard_timeLeft') || '0', 10) : 0);
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
   const timerRef = useRef(null);
-  const watchLocationRef = useRef(null); // 🌟 用嚟儲存實時定位追蹤器
+  const watchLocationRef = useRef(null); 
 
   // 假電話 & 警報
   const [fakeCallActive, setFakeCallActive] = useState(false);
@@ -107,7 +107,7 @@ export default function App() {
     } catch (e) { showAlert('錯誤', '網絡問題。'); }
   };
 
-  // 開始守護 (加入實時追蹤)
+  // 開始守護
   const startGuardian = async () => {
     if (!destination || !contactPhone) return showAlert('提示', '請填寫目的地同聯絡人！');
     const minutes = parseInt(duration);
@@ -119,7 +119,6 @@ export default function App() {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return showAlert('錯誤', '需要定位權限！');
 
-      // 獲取第一次準確位置
       let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
       const { latitude, longitude } = loc.coords;
 
@@ -143,12 +142,10 @@ export default function App() {
       
       if (!cameraPermission?.granted) await requestCameraPermission();
 
-      // 🌟 開啟實時追蹤：每移動 10 米更新一次 Firebase
       watchLocationRef.current = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 10 },
         async (newLoc) => {
           const { latitude: newLat, longitude: newLng } = newLoc.coords;
-          // 只更新座標同時間
           await setDoc(doc(db, "locations", currentUser), {
             lat: newLat, lng: newLng, updatedAt: new Date().toISOString()
           }, { merge: true });
@@ -179,7 +176,6 @@ export default function App() {
   // 安全抵達
   const stopGuardian = async () => {
     clearInterval(timerRef.current);
-    // 🌟 停止實時追蹤
     if (watchLocationRef.current) {
       watchLocationRef.current.remove();
       watchLocationRef.current = null;
@@ -276,7 +272,7 @@ export default function App() {
 
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
   
-  // 🌟 管理員潛水視訊 (改用社群伺服器免除登入)
+  // 管理員潛水視訊
   const startVideoCall = (roomName) => {
     const jitsiUrl = `https://meet.ffmuc.net/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
     Linking.openURL(jitsiUrl);
@@ -318,6 +314,23 @@ export default function App() {
     setAdminList([...adminList, newAdminName]);
     setNewAdminName('');
     showAlert('成功', `${newAdminName} 已成為管理員！`);
+  };
+
+  // 清空歷史紀錄
+  const clearHistory = () => {
+    showConfirm('確認清空', '確定要刪除所有歷史紀錄嗎？此操作無法復原！', async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "history"));
+        const deletePromises = [];
+        querySnapshot.forEach((doc) => {
+          deletePromises.push(deleteDoc(doc(db, "history", doc.id)));
+        });
+        await Promise.all(deletePromises);
+        showAlert('成功', '所有歷史紀錄已清空！');
+      } catch (e) {
+        showAlert('錯誤', '清空失敗，請檢查網絡。');
+      }
+    });
   };
 
   const resolveSOS = async (id) => {
@@ -511,7 +524,6 @@ export default function App() {
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
                   
-                  {/* 🌟 後台直接嵌入地圖 */}
                   <View style={{ height: 200, marginTop: 10, borderRadius: 10, overflow: 'hidden' }}>
                     {Platform.OS === 'web' ? (
                       <iframe
@@ -540,7 +552,14 @@ export default function App() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.label}>📜 守護歷史紀錄 ({historyList.length})</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={styles.label}>📜 守護歷史紀錄 ({historyList.length})</Text>
+              {historyList.length > 0 && (
+                <Pressable onPress={clearHistory} style={({pressed}) => [{ backgroundColor: '#F44336', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, opacity: pressed ? 0.7 : 1 }]}>
+                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>🗑️ 清空紀錄</Text>
+                </Pressable>
+              )}
+            </View>
             <ScrollView style={{ maxHeight: 300 }}>
               {historyList.length === 0 ? <Text style={{color:'#999'}}>暫無紀錄。</Text> : 
                 historyList.map((h, i) => (
