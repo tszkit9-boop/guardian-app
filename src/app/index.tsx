@@ -2,11 +2,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, ScrollView, Linking, Pressable, Platform, Modal, Dimensions } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
+// ===== Firebase 設定 =====
 const firebaseConfig = {
   apiKey: "AIzaSyAZNQcRCFis8e3aYy7b3nxd8pafzNgYw",
   authDomain: "guardian-app-f23c6.firebaseapp.com",
@@ -17,11 +19,12 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 const storage = getStorage(app);
 
 const { width } = Dimensions.get('window');
 
-// 網頁/手機版專用彈窗
+// ===== 工具函數 (兼容 Web 和手機) =====
 const showAlert = (title, msg) => {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
   else Alert.alert(title, msg);
@@ -30,57 +33,47 @@ const showConfirm = (title, msg, onConfirm) => {
   if (Platform.OS === 'web') {
     if (window.confirm(`${title}\n\n${msg}`)) onConfirm();
   } else {
-    Alert.alert(title, msg, [
-      { text: '取消', style: 'cancel' },
-      { text: '確定', style: 'destructive', onPress: onConfirm }
-    ]);
+    Alert.alert(title, msg, [{ text: '取消', style: 'cancel' }, { text: '確定', style: 'destructive', onPress: onConfirm }]);
   }
 };
-
-// 🌟 防手機 Safari 死機嘅安全 Storage
+// 防手機 Safari 死機的安全 Storage
 const safeStorage = {
-  get: (key, fallback = '') => {
-    try { return typeof window !== 'undefined' ? localStorage.getItem(key) || fallback : fallback; } catch (e) { return fallback; }
-  },
-  set: (key, value) => {
-    try { if (typeof window !== 'undefined') localStorage.setItem(key, value); } catch (e) {}
-  },
-  remove: (key) => {
-    try { if (typeof window !== 'undefined') localStorage.removeItem(key); } catch (e) {}
-  }
+  get: (key, fallback = '') => { try { return typeof window !== 'undefined' ? localStorage.getItem(key) || fallback : fallback; } catch (e) { return fallback; } },
+  set: (key, value) => { try { if (typeof window !== 'undefined') localStorage.setItem(key, value); } catch (e) {} },
+  remove: (key) => { try { if (typeof window !== 'undefined') localStorage.removeItem(key); } catch (e) {} }
 };
 
 export default function App() {
+  // ===== 狀態管理 =====
   const [currentUser, setCurrentUser] = useState(null);
   const [view, setView] = useState('guard'); 
-  
   const [isLoginMode, setIsLoginMode] = useState(true);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(''); 
   const [password, setPassword] = useState('');
+  const [showPrivacy, setShowPrivacy] = useState(false); 
 
-  // 表單記憶
+  // 守護功能狀態
   const [destination, setDestination] = useState(() => safeStorage.get('guard_dest'));
   const [contactPhone, setContactPhone] = useState(() => safeStorage.get('guard_phone'));
   const [duration, setDuration] = useState(() => safeStorage.get('guard_duration', '30'));
-
   const [isGuarding, setIsGuarding] = useState(() => safeStorage.get('guard_isGuarding') === 'true');
   const [timeLeft, setTimeLeft] = useState(() => parseInt(safeStorage.get('guard_timeLeft', '0'), 10));
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
+  
+  // 引用 Refs
   const timerRef = useRef(null);
   const watchLocationRef = useRef(null); 
+  const audioRef = useRef(null);
+  const cameraRef = useRef(null);
 
-  // 假電話 & 警報
+  // 自保與錄影狀態
   const [fakeCallActive, setFakeCallActive] = useState(false);
   const [sirenActive, setSirenActive] = useState(false);
-  const audioRef = useRef(null);
-
-  // 錄影
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const cameraRef = useRef(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 管理員數據
+  // 管理員數據狀態
   const [activeGuardians, setActiveGuardians] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
   const [videoList, setVideoList] = useState([]);
@@ -88,55 +81,75 @@ export default function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [adminList, setAdminList] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
-  const [targetUsername, setTargetUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
 
-  // 自動儲存守護狀態
+  // ===== 自動儲存守護狀態 =====
   useEffect(() => {
     safeStorage.set('guard_isGuarding', isGuarding.toString());
     safeStorage.set('guard_timeLeft', timeLeft.toString());
   }, [isGuarding, timeLeft]);
 
-  // 登入/註冊
+  // ===== Firebase Auth 監聽登入狀態 =====
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        const displayName = user.email.split('@')[0];
+        setCurrentUser(displayName);
+        if (displayName === 'tszkit9') setView('admin');
+        else setView('guard');
+      } else {
+        setCurrentUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // ===== 登入/註冊 (隱藏 Email 魔法) =====
   const handleAuth = async () => {
     if (!username || !password) return showAlert('提示', '請輸入名稱同密碼！');
+    if (username.includes('@')) return showAlert('提示', '名稱不能包含 @ 符號！');
+
+    const hiddenEmail = `${username.toLowerCase()}@guardian.app`;
+
     try {
-      const userRef = doc(db, "users", username);
-      const userSnap = await getDoc(userRef);
       if (isLoginMode) {
-        if (userSnap.exists() && userSnap.data().password === password) {
-          setCurrentUser(username);
-          if (username === 'tszkit9') setView('admin');
-          else setView('guard');
-        } else showAlert('錯誤', '名稱或密碼錯誤！');
+        await signInWithEmailAndPassword(auth, hiddenEmail, password);
       } else {
-        if (userSnap.exists()) showAlert('錯誤', '名稱已被使用！');
-        else {
-          await setDoc(userRef, { username, password });
-          showAlert('成功', '註冊成功！請登入。');
-          setIsLoginMode(true);
-        }
+        await createUserWithEmailAndPassword(auth, hiddenEmail, password);
+        showAlert('成功', '註冊成功！已自動登入。');
       }
-    } catch (e) { showAlert('錯誤', '網絡問題。'); }
+    } catch (e) { 
+      if (e.message.includes('password')) showAlert('錯誤', '密碼太弱（最少 6 位字元）'); 
+      else if (e.message.includes('email-already-in-use')) showAlert('錯誤', '呢個名稱已經有人用咗啦！'); 
+      else if (e.message.includes('user-not-found') || e.message.includes('invalid-credential')) showAlert('錯誤', '名稱或密碼錯誤！'); 
+      else showAlert('錯誤', '登入失敗，請檢查網絡。');
+    }
   };
 
-  // 開始守護
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setCurrentUser(null);
+      setView('guard');
+      endFakeCall();
+      setSirenActive(false);
+    } catch (e) { console.error(e); }
+  };
+
+  // ===== 開始守護 =====
   const startGuardian = async () => {
     if (!destination || !contactPhone) return showAlert('提示', '請填寫目的地同聯絡人！');
     const minutes = parseInt(duration);
     if (isNaN(minutes) || minutes <= 0) return showAlert('提示', '請輸入正確預計時間！');
-
     setLocationText('正在獲取位置及地址...');
 
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return showAlert('錯誤', '需要定位權限！');
 
-      // 🌟 手機版定位優化：用 Balanced 避免手機過熱同攞唔到定位
       let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = loc.coords;
-
       let addressString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+      
       try {
         let geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
         if (geocode.length > 0) {
@@ -153,23 +166,19 @@ export default function App() {
       setLocationText(`已定位：${addressString}`);
       setIsGuarding(true);
       setTimeLeft(minutes * 60); 
-      
       if (!cameraPermission?.granted) await requestCameraPermission();
 
       watchLocationRef.current = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
         async (newLoc) => {
           const { latitude: newLat, longitude: newLng } = newLoc.coords;
-          await setDoc(doc(db, "locations", currentUser), {
-            lat: newLat, lng: newLng, updatedAt: new Date().toISOString()
-          }, { merge: true });
+          await setDoc(doc(db, "locations", currentUser), { lat: newLat, lng: newLng, updatedAt: new Date().toISOString() }, { merge: true });
         }
       );
-
     } catch (error) { setLocationText('定位出錯'); }
   };
 
-  // 倒數計時
+  // ===== 倒數計時器 =====
   useEffect(() => {
     if (isGuarding && timeLeft > 0) {
       timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
@@ -182,88 +191,38 @@ export default function App() {
 
   const autoTriggerSOS = async () => {
     showAlert('⚠️ 逾時警告', '系統已自動發出求救！');
-    await addDoc(collection(db, "sos_alerts"), {
-      username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: true
-    });
+    await addDoc(collection(db, "sos_alerts"), { username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: true });
   };
 
-  // 安全抵達
+  // ===== 安全抵達 / 停止守護 =====
   const stopGuardian = async () => {
     clearInterval(timerRef.current);
-    if (watchLocationRef.current) {
-      watchLocationRef.current.remove();
-      watchLocationRef.current = null;
-    }
-
+    if (watchLocationRef.current) { watchLocationRef.current.remove(); watchLocationRef.current = null; }
     await setDoc(doc(db, "locations", currentUser), { status: 'arrived' }, { merge: true });
-    
-    await addDoc(collection(db, "history"), {
-      username: currentUser, destination: destination, contactPhone: contactPhone, status: '安全抵達', timestamp: new Date().toISOString()
-    });
-
-    setIsGuarding(false);
-    setTimeLeft(0);
-    safeStorage.remove('guard_isGuarding');
-    setLocationText('僅在你同意後分享定位');
+    await addDoc(collection(db, "history"), { username: currentUser, destination: destination, contactPhone: contactPhone, status: '安全抵達', timestamp: new Date().toISOString() });
+    setIsGuarding(false); setTimeLeft(0); safeStorage.remove('guard_isGuarding'); setLocationText('僅在你同意後分享定位');
     showAlert('安全抵達', '已通知後台你安全抵達。');
   };
 
-  // SOS 求救
+  // ===== 手動 SOS =====
   const triggerSOS = () => {
     showConfirm('確認求救', '確定要發出緊急求救嗎？', async () => {
       clearInterval(timerRef.current);
-      await addDoc(collection(db, "sos_alerts"), {
-        username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false
-      });
-      await addDoc(collection(db, "history"), {
-        username: currentUser, destination: destination, contactPhone: contactPhone, status: '發出SOS', timestamp: new Date().toISOString()
-      });
+      await addDoc(collection(db, "sos_alerts"), { username: currentUser, address: locationText, contactPhone: contactPhone, isAuto: false });
+      await addDoc(collection(db, "history"), { username: currentUser, destination: destination, contactPhone: contactPhone, status: '發出SOS', timestamp: new Date().toISOString() });
       showAlert('求救已發出', '管理員已收到通知！');
     });
   };
 
-  // 假電話
-  const triggerFakeCall = () => {
-    setFakeCallActive(true);
-    try {
-      if (typeof window !== 'undefined') {
-        audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg');
-        audioRef.current.loop = true;
-        audioRef.current.play().catch(e => console.log("音效被瀏覽器攔截", e));
-      }
-    } catch(e) {}
-  };
-  const endFakeCall = () => {
-    setFakeCallActive(false);
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-  };
+  // ===== 假電話 & 防狼警報 =====
+  const triggerFakeCall = () => { setFakeCallActive(true); try { if (typeof window !== 'undefined') { audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg'); audioRef.current.loop = true; audioRef.current.play().catch(e => console.log(e)); } } catch(e) {} };
+  const endFakeCall = () => { setFakeCallActive(false); if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } };
+  const toggleSiren = () => { if (sirenActive) { setSirenActive(false); if (audioRef.current) { audioRef.current.pause(); } } else { setSirenActive(true); try { if (typeof window !== 'undefined') { audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg'); audioRef.current.loop = true; audioRef.current.play().catch(e => console.log(e)); } } catch(e) {} } };
 
-  // 防狼警報
-  const toggleSiren = () => {
-    if (sirenActive) {
-      setSirenActive(false);
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-    } else {
-      setSirenActive(true);
-      try {
-        if (typeof window !== 'undefined') {
-          audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
-          audioRef.current.loop = true;
-          audioRef.current.play().catch(e => console.log("音效被瀏覽器攔截", e));
-        }
-      } catch(e) {}
-    }
-  };
-
-  // 錄影
+  // ===== 錄影功能 =====
   const handleRecordVideo = async () => {
     if (!cameraRef.current) return;
-    if (isRecording) {
-      cameraRef.current.stopRecording();
-      setIsRecording(false);
-      return;
-    }
-
+    if (isRecording) { cameraRef.current.stopRecording(); setIsRecording(false); return; }
     setIsRecording(true);
     try {
       const video = await cameraRef.current.recordAsync({ maxDuration: 15 });
@@ -274,128 +233,84 @@ export default function App() {
         const storageRef = ref(storage, `videos/${currentUser}-${Date.now()}.mp4`);
         await uploadBytes(storageRef, blob);
         const downloadURL = await getDownloadURL(storageRef);
-
-        await addDoc(collection(db, "videos"), {
-          username: currentUser, videoUrl: downloadURL, timestamp: new Date().toISOString()
-        });
+        await addDoc(collection(db, "videos"), { username: currentUser, videoUrl: downloadURL, timestamp: new Date().toISOString() });
         showAlert('錄影成功', '影片已安全上傳到後台。');
       }
-    } catch (error) {
-      showAlert('錄影失敗', '請確保已允許相機權限。');
-    } finally {
-      setIsRecording(false);
-      setIsUploading(false);
-    }
+    } catch (error) { showAlert('錄影失敗', '請確保已允許相機權限。'); } finally { setIsRecording(false); setIsUploading(false); }
   };
 
   const callPhone = (phone) => Linking.openURL(`tel:${phone}`);
-  
-  // 管理員潛水視訊
-  const startVideoCall = (roomName) => {
-    const jitsiUrl = `https://meet.ffmuc.net/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
-    Linking.openURL(jitsiUrl);
-  };
+  const startVideoCall = (roomName) => { Linking.openURL(`https://meet.ffmuc.net/guardian-${roomName}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`); };
 
-  // 管理員實時監聽
+  // ===== 管理員實時監聽 =====
   useEffect(() => {
     if (currentUser === 'tszkit9' && view === 'admin') {
-      const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => {
-        const locs = [];
-        snapshot.forEach(doc => { if (doc.data().status === 'guarding') locs.push(doc.data()); });
-        setActiveGuardians(locs);
-      });
-      const unsubSOS = onSnapshot(collection(db, "sos_alerts"), (snapshot) => {
-        const alerts = [];
-        snapshot.forEach(doc => alerts.push({ id: doc.id, ...doc.data() }));
-        setSosAlerts(alerts);
-      });
-      const unsubVideos = onSnapshot(collection(db, "videos"), (snapshot) => {
-        const vids = [];
-        snapshot.forEach(doc => vids.push({ id: doc.id, ...doc.data() }));
-        setVideoList(vids.reverse()); 
-      });
-      const unsubHistory = onSnapshot(collection(db, "history"), (snapshot) => {
-        const hists = [];
-        snapshot.forEach(doc => hists.push({ id: doc.id, ...doc.data() }));
-        setHistoryList(hists.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))); 
-      });
-
+      const unsubLoc = onSnapshot(collection(db, "locations"), (snapshot) => { const locs = []; snapshot.forEach(doc => { if (doc.data().status === 'guarding') locs.push(doc.data()); }); setActiveGuardians(locs); });
+      const unsubSOS = onSnapshot(collection(db, "sos_alerts"), (snapshot) => { const alerts = []; snapshot.forEach(doc => alerts.push({ id: doc.id, ...doc.data() })); setSosAlerts(alerts); });
+      const unsubVideos = onSnapshot(collection(db, "videos"), (snapshot) => { const vids = []; snapshot.forEach(doc => vids.push({ id: doc.id, ...doc.data() })); setVideoList(vids.reverse()); });
+      const unsubHistory = onSnapshot(collection(db, "history"), (snapshot) => { const hists = []; snapshot.forEach(doc => hists.push({ id: doc.id, ...doc.data() })); setHistoryList(hists.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))); });
       getDocs(collection(db, "users")).then(snap => { const u=[]; snap.forEach(d => u.push(d.id)); setAllUsers(u); });
       getDocs(collection(db, "admins")).then(snap => { const a=[]; snap.forEach(d => a.push(d.id)); setAdminList(a); });
       return () => { unsubLoc(); unsubSOS(); unsubVideos(); unsubHistory(); };
     }
   }, [currentUser, view]);
 
-  const addAdmin = async () => {
-    if (!newAdminName) return showAlert('提示', '請輸入名稱');
-    await setDoc(doc(db, "admins", newAdminName), { role: "admin" });
-    setAdminList([...adminList, newAdminName]);
-    setNewAdminName('');
-    showAlert('成功', `${newAdminName} 已成為管理員！`);
-  };
+  const addAdmin = async () => { if (!newAdminName) return showAlert('提示', '請輸入名稱'); await setDoc(doc(db, "admins", newAdminName), { role: "admin" }); setAdminList([...adminList, newAdminName]); setNewAdminName(''); showAlert('成功', `${newAdminName} 已成為管理員！`); };
+  
+  // 清空歷史紀錄 (修復變數衝突 Bug)
+  const clearHistory = () => { showConfirm('確認清空', '確定要刪除所有歷史紀錄嗎？', async () => { try { const querySnapshot = await getDocs(collection(db, "history")); const deletePromises = []; querySnapshot.forEach((document) => { deletePromises.push(deleteDoc(doc(db, "history", document.id))); }); await Promise.all(deletePromises); showAlert('成功', '所有歷史紀錄已清空！'); } catch (e) { showAlert('錯誤', '清空失敗。'); } }); };
+  
+  const resolveSOS = async (id) => { showConfirm('確認處理', '確定要標記為已處理嗎？', async () => { await deleteDoc(doc(db, "sos_alerts", id)); }); };
+  
+  const formatTime = (seconds) => { const m = Math.floor(seconds / 60).toString().padStart(2, '0'); const s = (seconds % 60).toString().padStart(2, '0'); return `${m}:${s}`; };
 
-  // 清空歷史紀錄
-  const clearHistory = () => {
-    showConfirm('確認清空', '確定要刪除所有歷史紀錄嗎？此操作無法復原！', async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, "history"));
-        const deletePromises = [];
-        querySnapshot.forEach((document) => {
-          deletePromises.push(deleteDoc(doc(db, "history", document.id)));
-        });
-        await Promise.all(deletePromises);
-        showAlert('成功', '所有歷史紀錄已清空！');
-      } catch (e) {
-        console.error("清空失敗:", e);
-        showAlert('錯誤', '清空失敗，請檢查網絡或 Firebase 權限。');
-      }
-    });
-  };
-
-  const resolveSOS = async (id) => {
-    showConfirm('確認處理', '確定要標記為已處理並清除警報嗎？', async () => {
-      await deleteDoc(doc(db, "sos_alerts", id));
-    });
-  };
-
-  const changeUserPassword = async () => {
-    if (!targetUsername || !newPassword) return showAlert('提示', '請輸入要修改嘅用戶名稱同新密碼！');
-    try {
-      const userRef = doc(db, "users", targetUsername);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        await updateDoc(userRef, { password: newPassword });
-        showAlert('成功', `用戶 ${targetUsername} 嘅密碼已成功修改為：${newPassword}`);
-        setTargetUsername(''); setNewPassword('');
-      } else {
-        showAlert('錯誤', `搵唔到用戶 ${targetUsername}，請確認名稱是否正確。`);
-      }
-    } catch (e) { showAlert('錯誤', '修改失敗，請檢查網絡。'); }
-  };
-
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
+  // ===== 登入介面 =====
   if (!currentUser) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.title}>🛡️ 守護同行</Text>
         <Text style={styles.subtitle}>{isLoginMode ? '登入帳戶' : '註冊新帳戶'}</Text>
-        <TextInput style={styles.input} placeholder="輸入名稱" value={username} onChangeText={setUsername} autoCapitalize="none" />
-        <TextInput style={styles.input} placeholder="輸入密碼" value={password} onChangeText={setPassword} secureTextEntry />
+        
+        <TextInput style={styles.input} placeholder="輸入名稱 (例如: tszkit9)" value={username} onChangeText={setUsername} autoCapitalize="none" />
+        <TextInput style={styles.input} placeholder="輸入密碼 (最少 6 位)" value={password} onChangeText={setPassword} secureTextEntry />
+        
         <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={handleAuth}>
           <Text style={styles.buttonText}>{isLoginMode ? '登入' : '確認註冊'}</Text>
         </Pressable>
+        
         <Pressable onPress={() => setIsLoginMode(!isLoginMode)} style={{ marginTop: 20 }}>
           <Text style={{ textAlign: 'center', color: '#2196F3', fontSize: 16 }}>{isLoginMode ? '未有名稱？去註冊' : '已經有帳戶？去登入'}</Text>
         </Pressable>
+
+        <Pressable onPress={() => setShowPrivacy(true)} style={{ marginTop: 40 }}>
+          <Text style={{ textAlign: 'center', color: '#999', fontSize: 12, textDecorationLine: 'underline' }}>閱讀私隱政策與服務條款</Text>
+        </Pressable>
+
+        <Modal visible={showPrivacy} animationType="slide" transparent={true}>
+          <View style={styles.modalBg}>
+            <View style={styles.modalContent}>
+              <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 15 }}>私隱政策與服務條款</Text>
+              <ScrollView style={{ maxHeight: 300, marginBottom: 20 }}>
+                <Text style={{ lineHeight: 22, color: '#333' }}>
+                  1. 資料收集：本應用程式會收集您的位置、電話號碼及錄影畫面，僅用於保障您的安全及提供守護服務。{'\n\n'}
+                  2. 資料儲存：您的資料將加密儲存於 Firebase 雲端伺服器。{'\n\n'}
+                  3. 資料分享：當您觸發 SOS 時，系統會將您的位置及緊急聯絡人電話分享給管理員。{'\n\n'}
+                  4. 錄影證據：您錄製的影片將保留 30 天，之後系統會自動刪除。{'\n\n'}
+                  5. 帳戶安全：我們使用 Firebase Authentication 保護您的密碼。{'\n\n'}
+                  6. 聯絡我們：如有任何爭議，請聯絡 admin@guardian.com。
+                </Text>
+              </ScrollView>
+              <Pressable style={styles.button} onPress={() => setShowPrivacy(false)}>
+                <Text style={styles.buttonText}>我同意並關閉</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
 
+  // ===== 主畫面 =====
   return (
     <SafeAreaView style={styles.mainContainer}>
       <Modal visible={fakeCallActive} animationType="slide" transparent={false}>
@@ -416,16 +331,16 @@ export default function App() {
               <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 後台' : '🏠 首頁'}</Text>
             </Pressable>
           )}
-          <Pressable onPress={() => { setCurrentUser(null); setView('guard'); endFakeCall(); setSirenActive(false); }} style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', opacity: pressed ? 0.7 : 1 }]}>
+          <Pressable onPress={handleLogout} style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', opacity: pressed ? 0.7 : 1 }]}>
             <Text style={styles.navBtnText}>登出</Text>
           </Pressable>
         </View>
       </View>
 
+      {/* 用戶守護介面 */}
       {view === 'guard' && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 80 }]}>
           <Text style={styles.pageTitle}>守護同行 Guardian</Text>
-          
           <View style={styles.card}>
             <Text style={styles.label}>📍 現在位置</Text>
             <Text style={styles.locationText}>{locationText}</Text>
@@ -445,7 +360,6 @@ export default function App() {
                 <Text style={styles.label}>⏱️ 預計需要時間（分鐘）</Text>
                 <TextInput style={styles.input} placeholder="例如: 30" value={duration} onChangeText={(t) => { setDuration(t); safeStorage.set('guard_duration', t); }} keyboardType="numeric" />
               </View>
-              
               <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={startGuardian}>
                 <Text style={styles.buttonText}>開始安全陪伴</Text>
               </Pressable>
@@ -453,15 +367,10 @@ export default function App() {
           ) : (
             <View style={styles.guardingBox}>
               <Text style={styles.guardingText}>🛡️ 守護中...前往 {destination}</Text>
-              
               <View style={{ alignItems: 'center', marginVertical: 15 }}>
                 <Text style={{ fontSize: 16, color: '#666' }}>預計剩餘時間</Text>
-                <Text style={{ fontSize: 48, fontWeight: 'bold', color: timeLeft < 300 ? '#D32F2F' : '#2E7D32' }}>
-                  {formatTime(timeLeft)}
-                </Text>
+                <Text style={{ fontSize: 48, fontWeight: 'bold', color: timeLeft < 300 ? '#D32F2F' : '#2E7D32' }}>{formatTime(timeLeft)}</Text>
               </View>
-
-              {/* 🌟 手機版相機尺寸優化 */}
               {cameraPermission?.granted ? (
                 <View style={{ marginBottom: 15, borderRadius: 10, overflow: 'hidden', height: Math.min(width * 0.6, 250) }}>
                   <CameraView style={{ flex: 1 }} ref={cameraRef} mode="video" facing="back" />
@@ -471,46 +380,31 @@ export default function App() {
                   <Text style={styles.buttonText}>允許相機權限 (用於錄影)</Text>
                 </Pressable>
               )}
-
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
-                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#FF9800', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={triggerFakeCall}>
-                  <Text style={styles.buttonText}>📞 假電話</Text>
-                </Pressable>
-                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: sirenActive ? '#D32F2F' : '#F44336', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={toggleSiren}>
-                  <Text style={styles.buttonText}>{sirenActive ? '🔕 關閉警報' : '🚨 警報'}</Text>
-                </Pressable>
+                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#FF9800', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={triggerFakeCall}><Text style={styles.buttonText}>📞 假電話</Text></Pressable>
+                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: sirenActive ? '#D32F2F' : '#F44336', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={toggleSiren}><Text style={styles.buttonText}>{sirenActive ? '🔕 關閉警報' : '🚨 警報'}</Text></Pressable>
               </View>
-
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
-                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#2196F3', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(contactPhone)}>
-                  <Text style={styles.buttonText}>📞 致電</Text>
-                </Pressable>
-                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#9C27B0', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(currentUser)}>
-                  <Text style={styles.buttonText}>📹 視訊</Text>
-                </Pressable>
+                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#2196F3', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(contactPhone)}><Text style={styles.buttonText}>📞 致電</Text></Pressable>
+                <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#9C27B0', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(currentUser)}><Text style={styles.buttonText}>📹 視訊</Text></Pressable>
               </View>
-
               {cameraPermission?.granted && (
                 <Pressable style={({pressed}) => [styles.button, { backgroundColor: isRecording ? '#D32F2F' : '#607D8B', marginTop: 15, opacity: pressed ? 0.7 : 1 }]} onPress={handleRecordVideo} disabled={isUploading}>
                   <Text style={styles.buttonText}>{isUploading ? '上傳中...' : isRecording ? '⏹️ 停止並上傳' : '🔴 錄影存證'}</Text>
                 </Pressable>
               )}
-
-              <Pressable style={({pressed}) => [styles.button, { backgroundColor: '#D32F2F', marginTop: 15, opacity: pressed ? 0.7 : 1 }]} onPress={triggerSOS}>
-                <Text style={styles.buttonText}>🚨 我感覺不安全 (SOS)</Text>
-              </Pressable>
-              <Pressable style={({pressed}) => [styles.button, styles.stopButton, {opacity: pressed ? 0.7 : 1}]} onPress={stopGuardian}>
-                <Text style={styles.buttonText}>我已安全抵達</Text>
-              </Pressable>
+              <Pressable style={({pressed}) => [styles.button, { backgroundColor: '#D32F2F', marginTop: 15, opacity: pressed ? 0.7 : 1 }]} onPress={triggerSOS}><Text style={styles.buttonText}>🚨 我感覺不安全 (SOS)</Text></Pressable>
+              <Pressable style={({pressed}) => [styles.button, styles.stopButton, {opacity: pressed ? 0.7 : 1}]} onPress={stopGuardian}><Text style={styles.buttonText}>我已安全抵達</Text></Pressable>
             </View>
           )}
         </ScrollView>
       )}
 
+      {/* 管理員後台介面 */}
       {view === 'admin' && currentUser === 'tszkit9' && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 80 }]}>
           <Text style={styles.pageTitle}>👑 管理員控制台</Text>
-
+          
           {sosAlerts.length > 0 && (
             <View style={[styles.card, { backgroundColor: '#FFEBEE', borderColor: '#D32F2F', borderWidth: 2 }]}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#D32F2F', marginBottom: 10 }}>🚨 緊急求救！</Text>
@@ -519,16 +413,10 @@ export default function App() {
                   <Text style={{ fontWeight: 'bold', fontSize: 16 }}>用戶：{alert.username} {alert.isAuto && '(逾時)'}</Text>
                   <Text style={{ marginVertical: 5 }}>位置：{alert.address}</Text>
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
-                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(alert.contactPhone)}>
-                      <Text style={styles.buttonText}>📞 致電</Text>
-                    </Pressable>
-                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0', opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(alert.username)}>
-                      <Text style={styles.buttonText}>📹 視訊</Text>
-                    </Pressable>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#D32F2F', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(alert.contactPhone)}><Text style={styles.buttonText}>📞 致電</Text></Pressable>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0', opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(alert.username)}><Text style={styles.buttonText}>📹 視訊</Text></Pressable>
                   </View>
-                  <Pressable style={({pressed}) => [styles.button, { marginTop: 10, padding: 10, backgroundColor: '#4CAF50', opacity: pressed ? 0.7 : 1 }]} onPress={() => resolveSOS(alert.id)}>
-                    <Text style={styles.buttonText}>✅ 標記為已處理</Text>
-                  </Pressable>
+                  <Pressable style={({pressed}) => [styles.button, { marginTop: 10, padding: 10, backgroundColor: '#4CAF50', opacity: pressed ? 0.7 : 1 }]} onPress={() => resolveSOS(alert.id)}><Text style={styles.buttonText}>✅ 標記為已處理</Text></Pressable>
                 </View>
               ))}
             </View>
@@ -542,29 +430,16 @@ export default function App() {
                   <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 {g.username}</Text>
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
-                  
-                  {/* 🌟 手機版地圖尺寸優化 */}
                   <View style={{ height: Math.min(width * 0.6, 250), marginTop: 10, borderRadius: 10, overflow: 'hidden' }}>
                     {Platform.OS === 'web' ? (
-                      <iframe
-                        src={`https://maps.google.com/maps?q=${g.lat},${g.lng}&z=16&output=embed`}
-                        style={{ width: '100%', height: '100%', border: 0 }}
-                        allowFullScreen
-                      />
+                      <iframe src={`https://maps.google.com/maps?q=${g.lat},${g.lng}&z=16&output=embed`} style={{ width: '100%', height: '100%', border: 0 }} allowFullScreen />
                     ) : (
-                      <Pressable onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}>
-                        <Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text>
-                      </Pressable>
+                      <Pressable onPress={() => Linking.openURL(`https://maps.google.com/?q=${g.lat},${g.lng}`)}><Text style={{ color: '#2196F3', marginTop: 5, fontWeight: 'bold' }}>🗺️ 喺 Google Maps 睇位置</Text></Pressable>
                     )}
                   </View>
-
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(g.contactPhone)}>
-                      <Text style={styles.buttonText}>📞 致電</Text>
-                    </Pressable>
-                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0', opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(g.username)}>
-                      <Text style={styles.buttonText}>📹 視訊</Text>
-                    </Pressable>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#2196F3', opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(g.contactPhone)}><Text style={styles.buttonText}>📞 致電</Text></Pressable>
+                    <Pressable style={({pressed}) => [styles.button, { flex: 1, padding: 8, backgroundColor: '#9C27B0', opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(g.username)}><Text style={styles.buttonText}>📹 視訊</Text></Pressable>
                   </View>
                 </View>
               ))
@@ -575,33 +450,20 @@ export default function App() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <Text style={styles.label}>📜 歷史紀錄 ({historyList.length})</Text>
               {historyList.length > 0 && (
-                <Pressable onPress={clearHistory} style={({pressed}) => [{ backgroundColor: '#F44336', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, opacity: pressed ? 0.7 : 1 }]}>
-                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>🗑️ 清空</Text>
-                </Pressable>
+                <Pressable onPress={clearHistory} style={({pressed}) => [{ backgroundColor: '#F44336', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>🗑️ 清空</Text></Pressable>
               )}
             </View>
             <ScrollView style={{ maxHeight: 300 }}>
               {historyList.length === 0 ? <Text style={{color:'#999'}}>暫無紀錄。</Text> : 
                 historyList.map((h, i) => (
                   <View key={i} style={{ marginTop: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#EEE' }}>
-                    <Text style={{ fontWeight: 'bold', color: h.status === '發出SOS' ? '#D32F2F' : '#4CAF50' }}>
-                      {h.status === '發出SOS' ? '🚨 發出求救' : '✅ 安全抵達'} - {h.username}
-                    </Text>
+                    <Text style={{ fontWeight: 'bold', color: h.status === '發出SOS' ? '#D32F2F' : '#4CAF50' }}>{h.status === '發出SOS' ? '🚨 發出求救' : '✅ 安全抵達'} - {h.username}</Text>
                     <Text style={{ color: '#666', fontSize: 12 }}>{new Date(h.timestamp).toLocaleString()}</Text>
                     <Text style={{ color: '#333', marginTop: 3 }}>目的地：{h.destination}</Text>
                   </View>
                 ))
               }
             </ScrollView>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.label}>🔐 修改用戶密碼</Text>
-            <TextInput style={styles.input} value={targetUsername} onChangeText={setTargetUsername} placeholder="輸入用戶名稱" />
-            <TextInput style={styles.input} value={newPassword} onChangeText={setNewPassword} placeholder="輸入新密碼" />
-            <Pressable style={({pressed}) => [styles.button, {backgroundColor: '#3F51B5', opacity: pressed ? 0.7 : 1}]} onPress={changeUserPassword}>
-              <Text style={styles.buttonText}>確認修改密碼</Text>
-            </Pressable>
           </View>
 
           <View style={styles.card}>
@@ -614,9 +476,7 @@ export default function App() {
                   {Platform.OS === 'web' ? (
                     <video src={v.videoUrl} controls style={{ width: '100%', borderRadius: 8, maxHeight: 200, backgroundColor: '#000' }} />
                   ) : (
-                    <Pressable style={styles.button} onPress={() => Linking.openURL(v.videoUrl)}>
-                      <Text style={styles.buttonText}>📺 點擊播放影片</Text>
-                    </Pressable>
+                    <Pressable style={styles.button} onPress={() => Linking.openURL(v.videoUrl)}><Text style={styles.buttonText}>📺 點擊播放影片</Text></Pressable>
                   )}
                 </View>
               ))
@@ -626,9 +486,7 @@ export default function App() {
           <View style={styles.card}>
             <Text style={styles.label}>👑 新增管理員</Text>
             <TextInput style={styles.input} value={newAdminName} onChangeText={setNewAdminName} placeholder="輸入朋友名稱" />
-            <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={addAdmin}>
-              <Text style={styles.buttonText}>確認新增</Text>
-            </Pressable>
+            <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={addAdmin}><Text style={styles.buttonText}>確認新增</Text></Pressable>
             <Text style={{ marginTop: 10, color: '#666' }}>名單：{adminList.join(', ')}</Text>
           </View>
 
@@ -636,13 +494,13 @@ export default function App() {
             <Text style={styles.label}>👥 註冊用戶：{allUsers.length} 人</Text>
             <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
           </View>
-
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
+// ===== 樣式表 (已優化手機排版) =====
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: '#F5F5F5' },
   mainContainer: { flex: 1, backgroundColor: '#F5F5F5' },
@@ -663,4 +521,6 @@ const styles = StyleSheet.create({
   guardingBox: { backgroundColor: '#E8F5E9', padding: 15, borderRadius: 10, marginTop: 20 },
   guardingText: { fontSize: 18, fontWeight: 'bold', color: '#2E7D32', textAlign: 'center', marginBottom: 10 },
   stopButton: { backgroundColor: '#FF9800', marginTop: 15 },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '90%', backgroundColor: '#FFF', padding: 20, borderRadius: 10 },
 });
