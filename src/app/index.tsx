@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, ScrollView, Linking, Pressable, Platform, Modal } from 'react-native';
+import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, ScrollView, Linking, Pressable, Platform, Modal, Dimensions } from 'react-native';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -19,7 +19,9 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// 網頁版專用彈窗
+const { width } = Dimensions.get('window');
+
+// 網頁/手機版專用彈窗
 const showAlert = (title, msg) => {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
   else Alert.alert(title, msg);
@@ -35,6 +37,19 @@ const showConfirm = (title, msg, onConfirm) => {
   }
 };
 
+// 🌟 防手機 Safari 死機嘅安全 Storage
+const safeStorage = {
+  get: (key, fallback = '') => {
+    try { return typeof window !== 'undefined' ? localStorage.getItem(key) || fallback : fallback; } catch (e) { return fallback; }
+  },
+  set: (key, value) => {
+    try { if (typeof window !== 'undefined') localStorage.setItem(key, value); } catch (e) {}
+  },
+  remove: (key) => {
+    try { if (typeof window !== 'undefined') localStorage.removeItem(key); } catch (e) {}
+  }
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [view, setView] = useState('guard'); 
@@ -44,12 +59,12 @@ export default function App() {
   const [password, setPassword] = useState('');
 
   // 表單記憶
-  const [destination, setDestination] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('guard_dest') || '' : '');
-  const [contactPhone, setContactPhone] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('guard_phone') || '' : '');
-  const [duration, setDuration] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('guard_duration') || '30' : '30');
+  const [destination, setDestination] = useState(() => safeStorage.get('guard_dest'));
+  const [contactPhone, setContactPhone] = useState(() => safeStorage.get('guard_phone'));
+  const [duration, setDuration] = useState(() => safeStorage.get('guard_duration', '30'));
 
-  const [isGuarding, setIsGuarding] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('guard_isGuarding') === 'true' : false);
-  const [timeLeft, setTimeLeft] = useState(() => typeof window !== 'undefined' ? parseInt(localStorage.getItem('guard_timeLeft') || '0', 10) : 0);
+  const [isGuarding, setIsGuarding] = useState(() => safeStorage.get('guard_isGuarding') === 'true');
+  const [timeLeft, setTimeLeft] = useState(() => parseInt(safeStorage.get('guard_timeLeft', '0'), 10));
   const [locationText, setLocationText] = useState('僅在你同意後分享定位');
   const timerRef = useRef(null);
   const watchLocationRef = useRef(null); 
@@ -78,10 +93,8 @@ export default function App() {
 
   // 自動儲存守護狀態
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('guard_isGuarding', isGuarding.toString());
-      localStorage.setItem('guard_timeLeft', timeLeft.toString());
-    }
+    safeStorage.set('guard_isGuarding', isGuarding.toString());
+    safeStorage.set('guard_timeLeft', timeLeft.toString());
   }, [isGuarding, timeLeft]);
 
   // 登入/註冊
@@ -119,7 +132,8 @@ export default function App() {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return showAlert('錯誤', '需要定位權限！');
 
-      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      // 🌟 手機版定位優化：用 Balanced 避免手機過熱同攞唔到定位
+      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = loc.coords;
 
       let addressString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
@@ -143,7 +157,7 @@ export default function App() {
       if (!cameraPermission?.granted) await requestCameraPermission();
 
       watchLocationRef.current = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 10 },
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
         async (newLoc) => {
           const { latitude: newLat, longitude: newLng } = newLoc.coords;
           await setDoc(doc(db, "locations", currentUser), {
@@ -189,7 +203,7 @@ export default function App() {
 
     setIsGuarding(false);
     setTimeLeft(0);
-    if (typeof window !== 'undefined') localStorage.removeItem('guard_isGuarding');
+    safeStorage.remove('guard_isGuarding');
     setLocationText('僅在你同意後分享定位');
     showAlert('安全抵達', '已通知後台你安全抵達。');
   };
@@ -211,11 +225,13 @@ export default function App() {
   // 假電話
   const triggerFakeCall = () => {
     setFakeCallActive(true);
-    if (typeof window !== 'undefined') {
-      audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg');
-      audioRef.current.loop = true;
-      audioRef.current.play().catch(e => console.log(e));
-    }
+    try {
+      if (typeof window !== 'undefined') {
+        audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg');
+        audioRef.current.loop = true;
+        audioRef.current.play().catch(e => console.log("音效被瀏覽器攔截", e));
+      }
+    } catch(e) {}
   };
   const endFakeCall = () => {
     setFakeCallActive(false);
@@ -229,11 +245,13 @@ export default function App() {
       if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
     } else {
       setSirenActive(true);
-      if (typeof window !== 'undefined') {
-        audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
-        audioRef.current.loop = true;
-        audioRef.current.play().catch(e => console.log(e));
-      }
+      try {
+        if (typeof window !== 'undefined') {
+          audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+          audioRef.current.loop = true;
+          audioRef.current.play().catch(e => console.log("音效被瀏覽器攔截", e));
+        }
+      } catch(e) {}
     }
   };
 
@@ -316,7 +334,7 @@ export default function App() {
     showAlert('成功', `${newAdminName} 已成為管理員！`);
   };
 
-  // 清空歷史紀錄 (修復命名衝突 Bug)
+  // 清空歷史紀錄
   const clearHistory = () => {
     showConfirm('確認清空', '確定要刪除所有歷史紀錄嗎？此操作無法復原！', async () => {
       try {
@@ -380,7 +398,6 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.mainContainer}>
-      {/* 假電話全螢幕彈出 */}
       <Modal visible={fakeCallActive} animationType="slide" transparent={false}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }}>
           <Text style={{ color: '#FFF', fontSize: 24, marginBottom: 10 }}>📞 媽媽 來電...</Text>
@@ -396,7 +413,7 @@ export default function App() {
         <View style={{ flexDirection: 'row', gap: 10 }}>
           {currentUser === 'tszkit9' && (
             <Pressable onPress={() => setView(view === 'guard' ? 'admin' : 'guard')} style={({ pressed }) => [styles.navBtn, { backgroundColor: view === 'admin' ? '#FF9800' : '#2196F3', opacity: pressed ? 0.7 : 1 }]}>
-              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 管理員後台' : '🏠 返回守護'}</Text>
+              <Text style={styles.navBtnText}>{view === 'guard' ? '⚙️ 後台' : '🏠 首頁'}</Text>
             </Pressable>
           )}
           <Pressable onPress={() => { setCurrentUser(null); setView('guard'); endFakeCall(); setSirenActive(false); }} style={({ pressed }) => [styles.navBtn, { backgroundColor: '#F44336', opacity: pressed ? 0.7 : 1 }]}>
@@ -418,15 +435,15 @@ export default function App() {
             <>
               <View style={styles.card}>
                 <Text style={styles.label}>🏠 目的地</Text>
-                <TextInput style={styles.input} placeholder="輸入安全抵達地點" value={destination} onChangeText={(t) => { setDestination(t); if (typeof window !== 'undefined') localStorage.setItem('guard_dest', t); }} />
+                <TextInput style={styles.input} placeholder="輸入安全抵達地點" value={destination} onChangeText={(t) => { setDestination(t); safeStorage.set('guard_dest', t); }} />
               </View>
               <View style={styles.card}>
                 <Text style={styles.label}>📞 緊急聯絡人電話</Text>
-                <TextInput style={styles.input} placeholder="例如: 91234567" value={contactPhone} onChangeText={(t) => { setContactPhone(t); if (typeof window !== 'undefined') localStorage.setItem('guard_phone', t); }} keyboardType="phone-pad" />
+                <TextInput style={styles.input} placeholder="例如: 91234567" value={contactPhone} onChangeText={(t) => { setContactPhone(t); safeStorage.set('guard_phone', t); }} keyboardType="phone-pad" />
               </View>
               <View style={styles.card}>
                 <Text style={styles.label}>⏱️ 預計需要時間（分鐘）</Text>
-                <TextInput style={styles.input} placeholder="例如: 30" value={duration} onChangeText={(t) => { setDuration(t); if (typeof window !== 'undefined') localStorage.setItem('guard_duration', t); }} keyboardType="numeric" />
+                <TextInput style={styles.input} placeholder="例如: 30" value={duration} onChangeText={(t) => { setDuration(t); safeStorage.set('guard_duration', t); }} keyboardType="numeric" />
               </View>
               
               <Pressable style={({pressed}) => [styles.button, {opacity: pressed ? 0.7 : 1}]} onPress={startGuardian}>
@@ -444,8 +461,9 @@ export default function App() {
                 </Text>
               </View>
 
+              {/* 🌟 手機版相機尺寸優化 */}
               {cameraPermission?.granted ? (
-                <View style={{ marginBottom: 15, borderRadius: 10, overflow: 'hidden', height: 200 }}>
+                <View style={{ marginBottom: 15, borderRadius: 10, overflow: 'hidden', height: Math.min(width * 0.6, 250) }}>
                   <CameraView style={{ flex: 1 }} ref={cameraRef} mode="video" facing="back" />
                 </View>
               ) : (
@@ -459,22 +477,22 @@ export default function App() {
                   <Text style={styles.buttonText}>📞 假電話</Text>
                 </Pressable>
                 <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: sirenActive ? '#D32F2F' : '#F44336', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={toggleSiren}>
-                  <Text style={styles.buttonText}>{sirenActive ? '🔕 關閉警報' : '🚨 防狼警報'}</Text>
+                  <Text style={styles.buttonText}>{sirenActive ? '🔕 關閉警報' : '🚨 警報'}</Text>
                 </Pressable>
               </View>
 
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
                 <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#2196F3', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => callPhone(contactPhone)}>
-                  <Text style={styles.buttonText}>📞 致電聯絡人</Text>
+                  <Text style={styles.buttonText}>📞 致電</Text>
                 </Pressable>
                 <Pressable style={({pressed}) => [styles.button, { flex: 1, backgroundColor: '#9C27B0', marginTop: 0, opacity: pressed ? 0.7 : 1 }]} onPress={() => startVideoCall(currentUser)}>
-                  <Text style={styles.buttonText}>📹 視像通話</Text>
+                  <Text style={styles.buttonText}>📹 視訊</Text>
                 </Pressable>
               </View>
 
               {cameraPermission?.granted && (
                 <Pressable style={({pressed}) => [styles.button, { backgroundColor: isRecording ? '#D32F2F' : '#607D8B', marginTop: 15, opacity: pressed ? 0.7 : 1 }]} onPress={handleRecordVideo} disabled={isUploading}>
-                  <Text style={styles.buttonText}>{isUploading ? '上傳中...' : isRecording ? '⏹️ 停止錄影並上傳' : '🔴 錄影存證'}</Text>
+                  <Text style={styles.buttonText}>{isUploading ? '上傳中...' : isRecording ? '⏹️ 停止並上傳' : '🔴 錄影存證'}</Text>
                 </Pressable>
               )}
 
@@ -525,7 +543,8 @@ export default function App() {
                   <Text>目的地：{g.destination}</Text>
                   <Text>位置：{g.address}</Text>
                   
-                  <View style={{ height: 200, marginTop: 10, borderRadius: 10, overflow: 'hidden' }}>
+                  {/* 🌟 手機版地圖尺寸優化 */}
+                  <View style={{ height: Math.min(width * 0.6, 250), marginTop: 10, borderRadius: 10, overflow: 'hidden' }}>
                     {Platform.OS === 'web' ? (
                       <iframe
                         src={`https://maps.google.com/maps?q=${g.lat},${g.lng}&z=16&output=embed`}
@@ -554,10 +573,10 @@ export default function App() {
 
           <View style={styles.card}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <Text style={styles.label}>📜 守護歷史紀錄 ({historyList.length})</Text>
+              <Text style={styles.label}>📜 歷史紀錄 ({historyList.length})</Text>
               {historyList.length > 0 && (
                 <Pressable onPress={clearHistory} style={({pressed}) => [{ backgroundColor: '#F44336', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, opacity: pressed ? 0.7 : 1 }]}>
-                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>🗑️ 清空紀錄</Text>
+                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>🗑️ 清空</Text>
                 </Pressable>
               )}
             </View>
@@ -578,7 +597,7 @@ export default function App() {
 
           <View style={styles.card}>
             <Text style={styles.label}>🔐 修改用戶密碼</Text>
-            <TextInput style={styles.input} value={targetUsername} onChangeText={setTargetUsername} placeholder="輸入用戶名稱 (例如: user1)" />
+            <TextInput style={styles.input} value={targetUsername} onChangeText={setTargetUsername} placeholder="輸入用戶名稱" />
             <TextInput style={styles.input} value={newPassword} onChangeText={setNewPassword} placeholder="輸入新密碼" />
             <Pressable style={({pressed}) => [styles.button, {backgroundColor: '#3F51B5', opacity: pressed ? 0.7 : 1}]} onPress={changeUserPassword}>
               <Text style={styles.buttonText}>確認修改密碼</Text>
@@ -586,7 +605,7 @@ export default function App() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.label}>🎥 用戶錄影證據 ({videoList.length})</Text>
+            <Text style={styles.label}>🎥 錄影證據 ({videoList.length})</Text>
             {videoList.length === 0 ? <Text style={{color:'#999'}}>暫無影片。</Text> : 
               videoList.map((v, i) => (
                 <View key={i} style={{ marginTop: 15, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 15 }}>
@@ -614,7 +633,7 @@ export default function App() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.label}>👥 註冊用戶總數：{allUsers.length} 人</Text>
+            <Text style={styles.label}>👥 註冊用戶：{allUsers.length} 人</Text>
             <Text style={{color: '#666', fontSize: 12, marginTop: 5}}>名單：{allUsers.join(', ')}</Text>
           </View>
 
@@ -631,7 +650,7 @@ const styles = StyleSheet.create({
   headerText: { fontSize: 16, fontWeight: 'bold' },
   navBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, cursor: 'pointer' },
   navBtnText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  content: { padding: 20 },
+  content: { padding: 15 },
   title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
   pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 15 },
   subtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
@@ -641,7 +660,7 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#F9F9F9', padding: 12, borderRadius: 8, marginTop: 5, marginBottom: 10, borderWidth: 1, borderColor: '#EEE', fontSize: 16 },
   button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
   buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  guardingBox: { backgroundColor: '#E8F5E9', padding: 20, borderRadius: 10, marginTop: 20 },
+  guardingBox: { backgroundColor: '#E8F5E9', padding: 15, borderRadius: 10, marginTop: 20 },
   guardingText: { fontSize: 18, fontWeight: 'bold', color: '#2E7D32', textAlign: 'center', marginBottom: 10 },
   stopButton: { backgroundColor: '#FF9800', marginTop: 15 },
 });
